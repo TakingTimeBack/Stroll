@@ -30,6 +30,9 @@
             --color-text: #ecf0f1;
             --color-text-light: #bdc3c7;
             --color-border: #343434;
+            --color-primary: #7ecb9e;
+            --color-primary-dark: #5fa87c;
+            --color-primary-light: #9dd9b8;
         }
 
         * {
@@ -43,7 +46,7 @@
             background: var(--color-bg);
             color: var(--color-text);
             -webkit-font-smoothing: antialiased;
-            transition: background 0.3s, color 0.3s;
+            transition: background 0.3s ease, color 0.3s ease;
         }
 
         html, body, #app {
@@ -764,60 +767,6 @@
                 <button class="btn-primary" id="generateBtn">Generate My Stroll</button>
 
                 <!-- Route Results -->
-                <div id="routeResults" class="hidden" style="margin-top: 20px;">
-                    <div id="map"></div>
-                    
-                    <div class="route-info">
-                        <div class="info-block">
-                            <div class="info-label">Distance</div>
-                            <div class="info-value" id="resultDistance">3.2 km (2 miles)</div>
-                        </div>
-
-                        <div class="info-block">
-                            <div class="info-label">Difficulty & Elevation</div>
-                            <div class="info-value" id="resultDifficulty">Moderate • 150 ft elevation</div>
-                        </div>
-
-                        <div class="info-block">
-                            <div class="info-label">Estimated Calories</div>
-                            <div class="info-value" id="resultCalories">~240 cal</div>
-                        </div>
-
-                        <div class="info-block">
-                            <div class="info-label">Surface Type</div>
-                            <div class="info-value" id="resultSurface">85% paved, 15% trails</div>
-                        </div>
-
-                        <div class="info-block">
-                            <div class="info-label">Rate This Route</div>
-                            <div class="rating-input" id="ratingInput">
-                                <span data-rating="1">⭐</span>
-                                <span data-rating="2">⭐</span>
-                                <span data-rating="3">⭐</span>
-                                <span data-rating="4">⭐</span>
-                                <span data-rating="5">⭐</span>
-                            </div>
-                            <div style="font-size: 12px; margin-top: 10px; color: var(--color-primary); font-weight: 500;" id="ratingMsg"></div>
-                        </div>
-
-                        <div>
-                            <div class="info-label" style="margin-bottom: 10px;">Share This Route</div>
-                            <div class="share-buttons" id="shareButtons">
-                                <button class="share-btn" id="shareTwitter" title="Twitter">𝕏</button>
-                                <button class="share-btn" id="shareWhatsApp" title="WhatsApp">💬</button>
-                                <button class="share-btn" id="shareFacebook" title="Facebook">f</button>
-                                <button class="share-btn" id="shareEmail" title="Email">✉️</button>
-                                <button class="share-btn" id="shareReddit" title="Reddit">Reddit</button>
-                                <button class="share-btn" id="shareCopy" title="Copy Link">📋</button>
-                            </div>
-                        </div>
-
-                        <div>
-                            <button class="btn" id="saveRouteBtn" style="width: 100%; margin-top: 10px; padding: 12px; border: 1.5px solid var(--color-border); background: var(--color-bg-alt); border-radius: 8px; font-weight: 600;">❤️ Save Route</button>
-                            <button class="btn" id="newRouteBtn" style="width: 100%; margin-top: 10px; padding: 12px; border: 1.5px solid var(--color-border); background: var(--color-bg-alt); border-radius: 8px; font-weight: 600;">Generate Another</button>
-                        </div>
-                    </div>
-                </div>
 
                 <!-- Developer Promotion -->
                 <div class="dev-promo" id="devPromo">
@@ -1181,9 +1130,9 @@
                 return;
             }
 
-            const mapContainer = document.getElementById('map');
+            const mapContainer = document.getElementById('modalMap');
             if (!mapContainer) {
-                console.error('Map container not found');
+                console.error('Modal map container not found');
                 return;
             }
 
@@ -1192,7 +1141,7 @@
 
             // Initialize map
             try {
-                const map = L.map('map').setView([coordinates[0][0], coordinates[0][1]], 14);
+                const map = L.map('modalMap').setView([coordinates[0][0], coordinates[0][1]], 14);
 
                 // Add tile layer
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1271,36 +1220,6 @@
             return `Just generated an awesome ${state.currentRoute.distance}km walk with Stroll! Generated in seconds, took hours. 🚶 ${window.location.href}`;
         }
 
-        document.getElementById('shareTwitter').addEventListener('click', () => {
-            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText() + ' #Stroll #Walking')}`, '_blank');
-        });
-
-        document.getElementById('shareWhatsApp').addEventListener('click', () => {
-            window.open(`https://wa.me/?text=${encodeURIComponent(getShareText())}`, '_blank');
-        });
-
-        document.getElementById('shareFacebook').addEventListener('click', () => {
-            window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`, '_blank');
-        });
-
-        document.getElementById('shareEmail').addEventListener('click', () => {
-            window.location.href = `mailto:?subject=Check out this walking route&body=${encodeURIComponent(getShareText())}`;
-        });
-
-        document.getElementById('shareReddit').addEventListener('click', () => {
-            window.open(`https://reddit.com/submit?url=${encodeURIComponent(window.location.href)}&title=${encodeURIComponent('Generated a walking route with Stroll')}`, '_blank');
-        });
-
-        document.getElementById('shareCopy').addEventListener('click', () => {
-            navigator.clipboard.writeText(getShareText()).then(() => showToast('Link copied!'));
-        });
-
-        // ==================== DEVELOPER SHARE ====================
-        document.getElementById('shareDevBtn').addEventListener('click', () => {
-            const text = "Try Stroll - an app that generates perfect walking routes in seconds. No planning needed. Free & indie-built 🚶 https://strollapp.app";
-            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text + ' #IndieHackers')}`, '_blank');
-        });
-
         // ==================== NEW ROUTE ====================
         document.getElementById('newRouteBtn').addEventListener('click', () => {
             document.getElementById('routeResults').classList.add('hidden');
@@ -1362,6 +1281,8 @@
 
         document.getElementById('newRouteBtn').addEventListener('click', () => {
             document.getElementById('resultsModal').style.display = 'none';
+            // Reset form for new generation
+            document.getElementById('locationInput').focus();
         });
 
         // Share buttons
@@ -1379,6 +1300,18 @@
             navigator.clipboard.writeText('strollapp.netlify.app').then(() => alert('Copied: strollapp.netlify.app'));
         });
 
+        document.getElementById('shareGoogleMaps').addEventListener('click', () => {
+            if (state.currentRoute && state.currentRoute.coordinates && state.currentRoute.coordinates.length > 0) {
+                const coords = state.currentRoute.coordinates;
+                const centerLat = coords[0][0];
+                const centerLng = coords[0][1];
+                const mapsUrl = `https://www.google.com/maps/search/${centerLat},${centerLng}/@${centerLat},${centerLng},15z`;
+                window.open(mapsUrl, '_blank');
+            } else {
+                alert('Generate a route first!');
+            }
+        });
+
         // Rating
         document.getElementById('ratingInput').addEventListener('click', (e) => {
             if (e.target.textContent === '⭐') {
@@ -1390,8 +1323,10 @@
         document.getElementById('darkModeBtn').addEventListener('click', () => {
             const html = document.documentElement;
             const isDark = html.getAttribute('data-theme') === 'dark';
-            html.setAttribute('data-theme', isDark ? 'light' : 'dark');
-            localStorage.setItem('theme', isDark ? 'light' : 'dark');
+            const newTheme = isDark ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            console.log('Theme switched to:', newTheme);
         });
 
         const savedTheme = localStorage.getItem('theme') || 'light';
@@ -1423,7 +1358,7 @@
                 <h2 style="font-size: 20px; font-weight: 700; margin: 0;">Your Route</h2>
                 <button id="closeResultsModal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b9080; padding: 0;">✕</button>
             </div>
-            <div id="map" style="width: 100%; height: 300px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ddd;"></div>
+            <div id="modalMap" style="width: 100%; height: 300px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ddd;"></div>
             <div style="background: #f8f9f8; border-radius: 12px; padding: 18px; border: 1px solid #e8eae6;">
                 <div style="margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid #e8eae6;">
                     <div style="font-size: 11px; text-transform: uppercase; color: #6b9080; font-weight: 700; margin-bottom: 6px;">Distance</div>
@@ -1439,9 +1374,10 @@
                 </div>
                 <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e8eae6;">
                     <div style="font-size: 11px; text-transform: uppercase; color: #6b9080; font-weight: 700; margin-bottom: 10px;">Share This Route</div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
                         <button id="shareTwitter" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">𝕏</button>
                         <button id="shareWhatsApp" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">💬</button>
+                        <button id="shareGoogleMaps" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">🗺️</button>
                         <button id="shareCopy" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">📋</button>
                     </div>
                 </div>
