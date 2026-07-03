@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#6b9080">
+    <meta name="description" content="Stroll - Generate circular walking routes. Free, indie-built, help a developer.">
+    <title>Stroll - Walking Routes Made Simple</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%236b9080' width='180' height='180'/><text x='50%' y='50%' font-size='100' font-weight='bold' fill='white' text-anchor='middle' dy='.3em'>//</text></svg>">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+        :root {
+            --color-primary: #6b9080;
+            --color-primary-dark: #4a5f55;
+            --color-primary-light: #8cb896;
+            --color-accent: #FC5200;
+            --color-bg: #ffffff;
+            --color-bg-alt: #f8f9f8;
+            --color-text: #2d3436;
+            --color-text-light: #636e72;
+            --color-border: #e8eae6;
+            --color-success: #4caf50;
+            --color-warning: #ff9800;
+        }
+
+        [data-theme="dark"] {
+            --color-bg: #1a1a1a;
+            --color-bg-alt: #242424;
+            --color-text: #ecf0f1;
+            --color-text-light: #bdc3c7;
+            --color-border: #343434;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: var(--color-bg);
+            color: var(--color-text);
+            -webkit-font-smoothing: antialiased;
+            transition: background 0.3s, color 0.3s;
+        }
+
+        html, body, #app {
+            width: 100%;
+            height: 100%;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: var(--color-bg);
+        }
+
+        /* Welcome Screen */
+        .welcome-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        .welcome-screen.hidden {
+            display: none !important;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .welcome-content {
+            background: var(--color-bg);
+            border-radius: 20px;
+            padding: 48px 28px;
+            max-width: 420px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+        }
+
+        .welcome-logo {
+            margin-bottom: 24px;
+        }
+
+        .welcome-content h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--color-text);
+            margin-bottom: 8px;
+        }
+
+        .welcome-tagline {
+            font-size: 14px;
+            color: var(--color-primary);
+            font-weight: 600;
+            letter-spacing: 1px;
+            margin-bottom: 24px;
+            text-transform: uppercase;
+        }
+
+        .welcome-description {
+            font-size: 15px;
+            color: var(--color-text-light);
+            line-height: 1.7;
+            margin-bottom: 32px;
+        }
+
+        .welcome-features {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 32px;
+        }
+
+        .welcome-feature {
+            background: var(--color-bg-alt);
+            padding: 16px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feature-icon {
+            font-size: 32px;
+        }
+
+        .feature-text {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--color-text);
+        }
+
+        .welcome-button {
+            background: var(--color-primary);
+            color: white;
+            padding: 16px 32px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+        }
+
+        .welcome-button:active {
+            background: var(--color-primary-dark);
+            transform: scale(0.98);
+        }
+
+        .welcome-skip {
+            background: none;
+            border: 2px solid var(--color-border);
+            color: var(--color-text);
+            padding: 14px 32px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .welcome-skip:active {
+            background: var(--color-bg-alt);
+        }
+
+        /* Header */
+        header {
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-bg);
+            padding: 14px 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .header-logo {
+            height: 36px;
+            width: auto;
+            margin-bottom: 2px;
+        }
+
+        .tagline {
+            font-size: 10px;
+            color: var(--color-primary);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .header-right {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 8px;
+            color: var(--color-primary);
+            transition: transform 0.2s;
+        }
+
+        .icon-btn:active {
+            transform: scale(0.92);
+        }
+
+        /* Main */
+        main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group {
+            margin-bottom: 24px;
+        }
+
+        .control-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--color-primary);
+            margin-bottom: 12px;
+            letter-spacing: 0.8px;
+        }
+
+        .button-group {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn, .btn-option {
+            padding: 11px 14px;
+            border: 1.5px solid var(--color-border);
+            border-radius: 8px;
+            background: var(--color-bg-alt);
+            color: var(--color-text);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:active, .btn-option:active {
+            transform: scale(0.95);
+        }
+
+        .btn-option.active {
+            background: var(--color-primary);
+            color: white;
+            border-color: var(--color-primary);
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: white;
+            padding: 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            margin: 20px 0;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:active {
+            background: var(--color-primary-dark);
+            transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: var(--color-accent);
+            color: white;
+            padding: 13px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .error-box {
+            background: #ffebee;
+            color: #c62828;
+            padding: 13px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            font-size: 13px;
+            border-left: 4px solid #c62828;
+        }
+
+        .error-box.hidden {
+            display: none;
+        }
+
+        /* Toggle Switch */
+        .toggle-group {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .toggle-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: var(--color-bg-alt);
+            border-radius: 10px;
+            border: 1px solid var(--color-border);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .toggle-item:active {
+            background: var(--color-border);
+        }
+
+        .toggle-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--color-text);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 28px;
+            background: #ccc;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: var(--color-primary);
+        }
+
+        .toggle-switch::before {
+            content: '';
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: white;
+            top: 2px;
+            left: 2px;
+            transition: left 0.3s;
+        }
+
+        .toggle-switch.active::before {
+            left: 24px;
+        }
+
+        .route-info {
+            background: var(--color-bg-alt);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 18px;
+            margin-top: 18px;
+        }
+
+        .info-block {
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .info-block:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .info-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--color-primary);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .info-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        .share-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .share-btn {
+            padding: 11px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1.5px solid var(--color-border);
+            background: var(--color-bg-alt);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .share-btn:active {
+            background: var(--color-border);
+            transform: scale(0.95);
+        }
+
+        .dev-promo {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+            color: white;
+            padding: 18px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .dev-promo h3 {
+            font-size: 15px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .dev-promo p {
+            font-size: 13px;
+            opacity: 0.95;
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
+
+        .dev-promo-btn {
+            background: white;
+            color: var(--color-primary);
+            padding: 11px 18px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        #map {
+            width: 100%;
+            height: 320px;
+            border-radius: 12px;
+            margin: 18px 0;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--color-primary);
+            color: white;
+            padding: 13px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 1000;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .tab-nav {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0;
+            border-bottom: 2px solid var(--color-border);
+            margin-bottom: 18px;
+        }
+
+        .tab-btn {
+            padding: 13px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--color-text-light);
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            border-bottom-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .rating-input {
+            font-size: 26px;
+            letter-spacing: 10px;
+            cursor: pointer;
+        }
+
+        .rating-input span {
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .rating-input span:hover {
+            transform: scale(1.2);
+        }
+
+        .challenge-card {
+            background: var(--color-bg-alt);
+            padding: 14px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            border: 1px solid var(--color-border);
+        }
+
+        .challenge-title {
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--color-text);
+        }
+
+        .challenge-progress {
+            width: 100%;
+            height: 7px;
+            background: var(--color-border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .challenge-progress-bar {
+            height: 100%;
+            background: var(--color-primary);
+            transition: width 0.3s;
+        }
+
+        @media (max-width: 480px) {
+            main {
+                padding: 16px;
+            }
+
+            .button-group {
+                grid-template-columns: repeat(4, 1fr);
+            }
+
+            .share-buttons {
+                grid-template-columns: repeat(3, 1fr);
+            }
+
+            .welcome-content {
+                padding: 40px 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="welcome-screen hidden">
+            <div class="welcome-content">
+                <div class="welcome-logo">
+                    <div style="font-size: 64px; font-weight: bold; color: var(--color-primary);">//</div>
+                </div>
+                
+                <h1>Welcome to Stroll</h1>
+                <p class="welcome-tagline">Taking Time Back</p>
+                
+                <div class="welcome-description">
+                    <p>Generate perfect walking routes instantly.</p>
+                    <p style="margin-top: 12px;">No planning needed. Just tell us where you are, how much time you have, and go.</p>
+                </div>
+
+                <div class="welcome-features">
+                    <div class="welcome-feature">
+                        <div class="feature-icon">👟</div>
+                        <div class="feature-text">Casual walks</div>
+                    </div>
+                    <div class="welcome-feature">
+                        <div class="feature-icon">👧</div>
+                        <div class="feature-text">Kid-friendly</div>
+                    </div>
+                    <div class="welcome-feature">
+                        <div class="feature-icon">🚼</div>
+                        <div class="feature-text">Pushchair-friendly</div>
+                    </div>
+                    <div class="welcome-feature">
+                        <div class="feature-icon">♿</div>
+                        <div class="feature-text">Accessible</div>
+                    </div>
+                </div>
+
+                <button class="welcome-button" id="welcomeStartBtn">Get Started</button>
+                <button class="welcome-skip" id="welcomeSkipBtn">Skip</button>
+            </div>
+        </div>
+
+        <!-- Header -->
+        <header>
+            <div class="header-left">
+                <img id="headerLogo" src="logos/Original_on_Transparent.png" alt="Stroll" class="header-logo" onerror="this.style.display='none'">
+                <div class="tagline">Taking Time Back</div>
+            </div>
+            <div class="header-right">
+                <button class="icon-btn" id="statsBtn" title="Stats">📊</button>
+                <button class="icon-btn" id="settingsBtn" title="Settings">⚙️</button>
+                <button class="icon-btn" id="darkModeBtn" title="Dark Mode">🌙</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Tab Navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" data-tab="generate">Generate</button>
+                <button class="tab-btn" data-tab="history">History ❤️</button>
+                <button class="tab-btn" data-tab="challenges">Challenges 🏆</button>
+                <button class="tab-btn" data-tab="popular">Popular 🔥</button>
+            </div>
+
+            <!-- GENERATE TAB -->
+            <div id="generate" class="tab-content active">
+                <div id="errorBox" class="error-box hidden"></div>
+
+                <!-- Location -->
+                <div class="control-group">
+                    <label class="control-label">📍 Where Are You?</label>
+                    <input type="text" id="locationInput" placeholder="Enter location or use GPS" 
+                           style="width: 100%; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt);">
+                    <button class="btn" id="gpsBtn" style="width: 100%; margin-top: 10px;">📍 Use My Location</button>
+                </div>
+
+                <!-- Time -->
+                <div class="control-group">
+                    <label class="control-label">⏱️ Time Available</label>
+                    <div class="button-group" id="timeButtons">
+                        <button class="btn btn-option active" data-time="15">15m</button>
+                        <button class="btn btn-option" data-time="20">20m</button>
+                        <button class="btn btn-option" data-time="30">30m</button>
+                        <button class="btn btn-option" data-time="45">45m</button>
+                        <button class="btn btn-option" data-time="60">1h</button>
+                        <button class="btn btn-option" data-time="90">1.5h</button>
+                        <button class="btn btn-option" data-time="120">2h</button>
+                        <button class="btn btn-option" data-time="180">3h</button>
+                    </div>
+                    <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+                        <input type="number" id="customTime" placeholder="Custom (min)" min="10" max="300" 
+                               style="flex: 1; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt);">
+                        <button id="customTimeBtn" class="btn" style="flex: 0.5; padding: 11px 12px;">Set</button>
+                    </div>
+                </div>
+
+                <!-- Pace -->
+                <div class="control-group">
+                    <label class="control-label">🚶 Walking Pace</label>
+                    <div class="button-group" id="paceButtons" style="grid-template-columns: repeat(3, 1fr);">
+                        <button class="btn btn-option" data-pace="3.0" data-pace-label="Slow">Slow</button>
+                        <button class="btn btn-option active" data-pace="4.0" data-pace-label="Medium">Medium</button>
+                        <button class="btn btn-option" data-pace="5.0" data-pace-label="Fast">Fast</button>
+                    </div>
+                    <div style="font-size: 13px; color: var(--color-text-light); margin-top: 10px; padding: 10px 12px; background: var(--color-bg-alt); border-radius: 8px;" id="paceInfo">~4 km/h (moderate walk)</div>
+                </div>
+
+                <!-- Difficulty -->
+                <div class="control-group">
+                    <label class="control-label">⛰️ Preferred Difficulty</label>
+                    <div class="button-group" style="grid-template-columns: repeat(3, 1fr);">
+                        <button class="btn btn-option" data-difficulty="easy">Easy</button>
+                        <button class="btn btn-option active" data-difficulty="moderate">Moderate</button>
+                        <button class="btn btn-option" data-difficulty="hard">Hard</button>
+                    </div>
+                </div>
+
+                <!-- Preferences (Toggle Switches) -->
+                <div class="control-group">
+                    <label class="control-label">✨ Route Preferences</label>
+                    <div class="toggle-group">
+                        <label class="toggle-item" id="prefScenicLabel">
+                            <span class="toggle-label">🌳 Scenic (parks, nature)</span>
+                            <div class="toggle-switch" id="prefScenicToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefQuietLabel">
+                            <span class="toggle-label">🤫 Quiet (less traffic)</span>
+                            <div class="toggle-switch" id="prefQuietToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefFlatLabel">
+                            <span class="toggle-label">➡️ Flat (low hills)</span>
+                            <div class="toggle-switch" id="prefFlatToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefDogLabel">
+                            <span class="toggle-label">🐕 Dog-friendly</span>
+                            <div class="toggle-switch" id="prefDogToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefPavedLabel">
+                            <span class="toggle-label">🛣️ Paved surfaces</span>
+                            <div class="toggle-switch" id="prefPavedToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefChildLabel">
+                            <span class="toggle-label">👧 Child-friendly</span>
+                            <div class="toggle-switch" id="prefChildToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefPushchairLabel">
+                            <span class="toggle-label">🚼 Pushchair-friendly</span>
+                            <div class="toggle-switch" id="prefPushchairToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefWheelchairLabel">
+                            <span class="toggle-label">♿ Wheelchair accessible</span>
+                            <div class="toggle-switch" id="prefWheelchairToggle"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <button class="btn-primary" id="generateBtn">Generate My Stroll</button>
+
+                <!-- Route Results -->
+                <div id="routeResults" class="hidden" style="margin-top: 20px;">
+                    <div id="map"></div>
+                    
+                    <div class="route-info">
+                        <div class="info-block">
+                            <div class="info-label">Distance</div>
+                            <div class="info-value" id="resultDistance">3.2 km (2 miles)</div>
+                        </div>
+
+                        <div class="info-block">
+                            <div class="info-label">Difficulty & Elevation</div>
+                            <div class="info-value" id="resultDifficulty">Moderate • 150 ft elevation</div>
+                        </div>
+
+                        <div class="info-block">
+                            <div class="info-label">Estimated Calories</div>
+                            <div class="info-value" id="resultCalories">~240 cal</div>
+                        </div>
+
+                        <div class="info-block">
+                            <div class="info-label">Surface Type</div>
+                            <div class="info-value" id="resultSurface">85% paved, 15% trails</div>
+                        </div>
+
+                        <div class="info-block">
+                            <div class="info-label">Rate This Route</div>
+                            <div class="rating-input" id="ratingInput">
+                                <span data-rating="1">⭐</span>
+                                <span data-rating="2">⭐</span>
+                                <span data-rating="3">⭐</span>
+                                <span data-rating="4">⭐</span>
+                                <span data-rating="5">⭐</span>
+                            </div>
+                            <div style="font-size: 12px; margin-top: 10px; color: var(--color-primary); font-weight: 500;" id="ratingMsg"></div>
+                        </div>
+
+                        <div>
+                            <div class="info-label" style="margin-bottom: 10px;">Share This Route</div>
+                            <div class="share-buttons" id="shareButtons">
+                                <button class="share-btn" id="shareTwitter" title="Twitter">𝕏</button>
+                                <button class="share-btn" id="shareWhatsApp" title="WhatsApp">💬</button>
+                                <button class="share-btn" id="shareFacebook" title="Facebook">f</button>
+                                <button class="share-btn" id="shareEmail" title="Email">✉️</button>
+                                <button class="share-btn" id="shareReddit" title="Reddit">Reddit</button>
+                                <button class="share-btn" id="shareCopy" title="Copy Link">📋</button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <button class="btn btn-primary" id="stravaBtn" style="margin-top: 16px;">Export to Strava</button>
+                            <button class="btn" id="saveRouteBtn" style="width: 100%; margin-top: 10px; padding: 12px; border: 1.5px solid var(--color-border); background: var(--color-bg-alt); border-radius: 8px; font-weight: 600;">❤️ Save Route</button>
+                            <button class="btn" id="newRouteBtn" style="width: 100%; margin-top: 10px; padding: 12px; border: 1.5px solid var(--color-border); background: var(--color-bg-alt); border-radius: 8px; font-weight: 600;">Generate Another</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Developer Promotion -->
+                <div class="dev-promo" id="devPromo">
+                    <h3>Help This Developer 🚀</h3>
+                    <p>Stroll is built by one person. Share it with a friend who loves walking!</p>
+                    <button class="dev-promo-btn" id="shareDevBtn">Share Stroll</button>
+                </div>
+            </div>
+
+            <!-- HISTORY TAB -->
+            <div id="history" class="tab-content">
+                <p style="text-align: center; color: var(--color-text-light); margin-top: 20px;">
+                    Save routes to see your history here ❤️
+                </p>
+                <div id="historyList"></div>
+            </div>
+
+            <!-- CHALLENGES TAB -->
+            <div id="challenges" class="tab-content">
+                <p style="font-size: 13px; color: var(--color-primary); margin-bottom: 14px; font-weight: 500;">
+                    Complete weekly walking challenges for badges 🏅
+                </p>
+                <div id="challengesList"></div>
+                <div style="margin-top: 18px; padding: 14px; background: var(--color-bg-alt); border-radius: 10px; font-size: 13px; border: 1px solid var(--color-border);">
+                    <strong style="color: var(--color-primary);">Your Badges:</strong> <div id="badgesDisplay" style="margin-top: 10px; font-size: 20px;"></div>
+                </div>
+            </div>
+
+            <!-- POPULAR TAB -->
+            <div id="popular" class="tab-content">
+                <p style="text-align: center; color: var(--color-text-light); margin-top: 20px;">
+                    Community heat map coming soon 🔥
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 80vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700;">Settings</h2>
+            
+            <div style="margin-bottom: 18px;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="soundToggle" checked>
+                    <span style="font-weight: 500;">Sound Effects</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 18px;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notificationsToggle" checked>
+                    <span style="font-weight: 500;">Notifications</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 20px; padding: 14px; background: var(--color-bg-alt); border-radius: 10px; border: 1px solid var(--color-border);">
+                <p style="font-size: 13px; margin-bottom: 10px; font-weight: 600; color: var(--color-primary);">💝 Support This Project</p>
+                <p style="font-size: 13px; margin-bottom: 12px; color: var(--color-text-light);">Stroll is free and always will be. Your support keeps development going.</p>
+                <a href="https://buymeacoffee.com/takingtimeback" target="_blank" style="display: inline-block; background: #FFDD00; color: #000; padding: 11px 16px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 13px;">☕ Buy Me a Coffee</a>
+            </div>
+
+            <button class="btn-primary" id="closeSettingsBtn">Close</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+        // ==================== STATE MANAGEMENT ====================
+        const state = {
+            location: null,
+            latitude: null,
+            longitude: null,
+            time: 30,
+            pace: 4.0,
+            paceLabel: 'Medium',
+            preferences: {
+                scenic: false,
+                quiet: false,
+                flat: false,
+                dog: false,
+                paved: false,
+                child: false,
+                pushchair: false,
+                wheelchair: false
+            },
+            difficulty: 'moderate',
+            currentRoute: null,
+            savedRoutes: [],
+            badges: [],
+            challenges: [
+                { id: 1, title: 'Walk 3 days this week', target: 3, current: 0, badge: '🏅' },
+                { id: 2, title: 'Total 10km this week', target: 10, current: 0, badge: '🚶' },
+                { id: 3, title: 'Try 2 new routes', target: 2, current: 0, badge: '🗺️' }
+            ]
+        };
+
+        // ==================== INITIALIZATION ====================
+        setupLogo();
+        loadFromStorage();
+        renderChallenges();
+        renderHistory();
+        showWelcomeIfNeeded();
+        setupToggleSwitches();
+
+        function setupLogo() {
+            const logo = document.getElementById('headerLogo');
+            if (logo) {
+                logo.onerror = function() {
+                    const header = document.querySelector('.header-left');
+                    header.innerHTML = '<div style="font-size: 28px; font-weight: bold; color: var(--color-primary);">//</div><div class="tagline">Taking Time Back</div>';
+                };
+            }
+        }
+
+        function loadFromStorage() {
+            const stored = localStorage.getItem('strollState');
+            if (stored) {
+                const saved = JSON.parse(stored);
+                state.savedRoutes = saved.savedRoutes || [];
+                state.badges = saved.badges || [];
+                state.challenges = saved.challenges || state.challenges;
+            }
+        }
+
+        function saveToStorage() {
+            localStorage.setItem('strollState', JSON.stringify({
+                savedRoutes: state.savedRoutes,
+                badges: state.badges,
+                challenges: state.challenges
+            }));
+        }
+
+        // ==================== WELCOME SCREEN ====================
+        function showWelcomeIfNeeded() {
+            const hasSeenWelcome = localStorage.getItem('strollWelcomeSeen');
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            
+            if (!hasSeenWelcome) {
+                welcomeScreen.classList.remove('hidden');
+            } else {
+                welcomeScreen.classList.add('hidden');
+            }
+        }
+
+        function hideWelcome() {
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            welcomeScreen.classList.add('hidden');
+            localStorage.setItem('strollWelcomeSeen', 'true');
+        }
+
+        document.getElementById('welcomeStartBtn').addEventListener('click', hideWelcome);
+        document.getElementById('welcomeSkipBtn').addEventListener('click', hideWelcome);
+
+        // ==================== TOGGLE SWITCHES ====================
+        function setupToggleSwitches() {
+            const toggles = {
+                'prefScenicToggle': 'scenic',
+                'prefQuietToggle': 'quiet',
+                'prefFlatToggle': 'flat',
+                'prefDogToggle': 'dog',
+                'prefPavedToggle': 'paved',
+                'prefChildToggle': 'child',
+                'prefPushchairToggle': 'pushchair',
+                'prefWheelchairToggle': 'wheelchair'
+            };
+
+            Object.entries(toggles).forEach(([elementId, prefKey]) => {
+                const toggle = document.getElementById(elementId);
+                const label = document.getElementById(elementId.replace('Toggle', 'Label'));
+                
+                if (toggle && label) {
+                    label.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        state.preferences[prefKey] = !state.preferences[prefKey];
+                        updateToggleVisuals();
+                    });
+                }
+            });
+
+            updateToggleVisuals();
+        }
+
+        function updateToggleVisuals() {
+            const toggles = {
+                'prefScenicToggle': 'scenic',
+                'prefQuietToggle': 'quiet',
+                'prefFlatToggle': 'flat',
+                'prefDogToggle': 'dog',
+                'prefPavedToggle': 'paved',
+                'prefChildToggle': 'child',
+                'prefPushchairToggle': 'pushchair',
+                'prefWheelchairToggle': 'wheelchair'
+            };
+
+            Object.entries(toggles).forEach(([elementId, prefKey]) => {
+                const toggle = document.getElementById(elementId);
+                if (toggle) {
+                    if (state.preferences[prefKey]) {
+                        toggle.classList.add('active');
+                    } else {
+                        toggle.classList.remove('active');
+                    }
+                }
+            });
+        }
+
+        // ==================== TAB NAVIGATION ====================
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.getElementById(tabName).classList.add('active');
+                btn.classList.add('active');
+            });
+        });
+
+        // ==================== LOCATION ====================
+        document.getElementById('gpsBtn').addEventListener('click', () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    state.latitude = pos.coords.latitude;
+                    state.longitude = pos.coords.longitude;
+                    state.location = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+                    document.getElementById('locationInput').value = state.location;
+                    showToast('📍 Location set!');
+                });
+            } else {
+                showError('Geolocation not supported');
+            }
+        });
+
+        document.getElementById('locationInput').addEventListener('change', (e) => {
+            state.location = e.target.value;
+        });
+
+        // ==================== TIME ====================
+        document.querySelectorAll('[data-time]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                state.time = parseInt(e.target.dataset.time);
+                document.querySelectorAll('[data-time]').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                document.getElementById('customTime').value = '';
+            });
+        });
+
+        document.getElementById('customTimeBtn').addEventListener('click', () => {
+            const customValue = parseInt(document.getElementById('customTime').value);
+            if (customValue && customValue >= 10 && customValue <= 300) {
+                state.time = customValue;
+                document.querySelectorAll('[data-time]').forEach(b => b.classList.remove('active'));
+                showToast(`Custom time set: ${customValue} minutes`);
+            } else {
+                showError('Enter a time between 10 and 300 minutes');
+            }
+        });
+
+        document.getElementById('customTime').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') document.getElementById('customTimeBtn').click();
+        });
+
+        // ==================== PACE ====================
+        document.querySelectorAll('[data-pace]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                state.pace = parseFloat(e.target.dataset.pace);
+                state.paceLabel = e.target.dataset.paceLabel;
+                document.querySelectorAll('[data-pace]').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                updatePaceInfo();
+            });
+        });
+
+        function updatePaceInfo() {
+            const descriptions = {
+                'Slow': '~3 km/h (leisurely walk)',
+                'Medium': '~4 km/h (moderate walk)',
+                'Fast': '~5 km/h (brisk walk)'
+            };
+            const el = document.getElementById('paceInfo');
+            if (el) el.textContent = descriptions[state.paceLabel] || '';
+        }
+
+        // ==================== DIFFICULTY ====================
+        document.querySelectorAll('[data-difficulty]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                state.difficulty = e.target.dataset.difficulty;
+                document.querySelectorAll('[data-difficulty]').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+            });
+        });
+
+        // ==================== GENERATE ROUTE ====================
+        const API_URL = '/.netlify/functions/generate-route';
+
+        document.getElementById('generateBtn').addEventListener('click', async () => {
+            if (!state.location) {
+                showError('Please enter a location');
+                return;
+            }
+
+            const btn = document.getElementById('generateBtn');
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        location: state.location,
+                        time: state.time,
+                        pace: state.pace,
+                        preferences: state.preferences,
+                        difficulty: state.difficulty
+                    })
+                });
+
+                if (!response.ok) throw new Error('Route generation failed');
+
+                const data = await response.json();
+                state.currentRoute = {
+                    id: Date.now(),
+                    ...data,
+                    timestamp: new Date().toISOString(),
+                    distance: (data.distance || 0).toFixed(1),
+                    difficulty: state.difficulty,
+                    calories: Math.round(state.time * (state.pace / 4) * 8),
+                    rating: 0
+                };
+
+                displayRoute();
+            } catch (error) {
+                showError('Unable to generate route. Please try again.');
+            } finally {
+                btn.textContent = 'Generate My Stroll';
+                btn.disabled = false;
+            }
+        });
+
+        function displayRoute() {
+            const results = document.getElementById('routeResults');
+            results.classList.remove('hidden');
+
+            const km = state.currentRoute.distance || 3.2;
+            const miles = (km * 0.621371).toFixed(1);
+            document.getElementById('resultDistance').textContent = `${km} km (${miles} miles)`;
+
+            const elevationGain = state.difficulty === 'easy' ? '50-100 ft' : state.difficulty === 'moderate' ? '100-200 ft' : '200+ ft';
+            document.getElementById('resultDifficulty').textContent = `${state.difficulty.charAt(0).toUpperCase() + state.difficulty.slice(1)} • ${elevationGain} elevation`;
+
+            document.getElementById('resultCalories').textContent = `~${state.currentRoute.calories} cal`;
+
+            const surface = state.preferences.paved ? '95% paved, 5% trails' : '75% paved, 25% trails';
+            document.getElementById('resultSurface').textContent = surface;
+
+            // DRAW MAP
+            setTimeout(() => {
+                drawMap(state.currentRoute.coordinates);
+            }, 100);
+
+            window.scrollTo({ top: results.offsetTop, behavior: 'smooth' });
+        }
+
+        function drawMap(coordinates) {
+            if (!coordinates || coordinates.length === 0) {
+                console.error('No coordinates provided');
+                return;
+            }
+
+            const mapContainer = document.getElementById('map');
+            if (!mapContainer) {
+                console.error('Map container not found');
+                return;
+            }
+
+            // Clear existing map
+            mapContainer.innerHTML = '';
+
+            // Initialize map
+            try {
+                const map = L.map('map').setView([coordinates[0][0], coordinates[0][1]], 14);
+
+                // Add tile layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(map);
+
+                // Draw route line
+                L.polyline(coordinates, {
+                    color: '#6b9080',
+                    weight: 4,
+                    opacity: 0.8,
+                    smoothFactor: 1
+                }).addTo(map);
+
+                // Add start marker (green)
+                L.marker(coordinates[0], {
+                    icon: L.icon({
+                        iconUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22%236b9080%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%228%22 fill=%22white%22/%3E%3C/svg%3E',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16],
+                        popupAnchor: [0, -16]
+                    })
+                }).bindPopup('Start').addTo(map);
+
+                // Add end marker (orange)
+                L.marker(coordinates[coordinates.length - 1], {
+                    icon: L.icon({
+                        iconUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22%23FC5200%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%228%22 fill=%22white%22/%3E%3C/svg%3E',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16],
+                        popupAnchor: [0, -16]
+                    })
+                }).bindPopup('End').addTo(map);
+
+                // Fit map to route with padding
+                const bounds = L.latLngBounds(coordinates);
+                map.fitBounds(bounds, { padding: [50, 50] });
+
+                // Invalidate size after showing
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 200);
+
+            } catch (error) {
+                console.error('Error drawing map:', error);
+            }
+        }
+
+        // ==================== RATING ====================
+        document.querySelectorAll('#ratingInput span').forEach(span => {
+            span.addEventListener('click', (e) => {
+                const rating = parseInt(e.target.dataset.rating);
+                state.currentRoute.rating = rating;
+                document.getElementById('ratingMsg').textContent = `Rated: ${rating}/5 ⭐`;
+                showToast(`Route rated: ${rating}/5 ⭐`);
+            });
+        });
+
+        // ==================== SAVE ROUTE ====================
+        document.getElementById('saveRouteBtn').addEventListener('click', () => {
+            if (state.currentRoute) {
+                const existing = state.savedRoutes.find(r => r.id === state.currentRoute.id);
+                if (!existing) {
+                    state.savedRoutes.push(state.currentRoute);
+                    saveToStorage();
+                    showToast('❤️ Route saved!');
+                } else {
+                    showToast('Already saved');
+                }
+            }
+        });
+
+        // ==================== SHARING ====================
+        function getShareText() {
+            return `Just generated an awesome ${state.currentRoute.distance}km walk with Stroll! Generated in seconds, took hours. 🚶 ${window.location.href}`;
+        }
+
+        document.getElementById('shareTwitter').addEventListener('click', () => {
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText() + ' #Stroll #Walking')}`, '_blank');
+        });
+
+        document.getElementById('shareWhatsApp').addEventListener('click', () => {
+            window.open(`https://wa.me/?text=${encodeURIComponent(getShareText())}`, '_blank');
+        });
+
+        document.getElementById('shareFacebook').addEventListener('click', () => {
+            window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`, '_blank');
+        });
+
+        document.getElementById('shareEmail').addEventListener('click', () => {
+            window.location.href = `mailto:?subject=Check out this walking route&body=${encodeURIComponent(getShareText())}`;
+        });
+
+        document.getElementById('shareReddit').addEventListener('click', () => {
+            window.open(`https://reddit.com/submit?url=${encodeURIComponent(window.location.href)}&title=${encodeURIComponent('Generated a walking route with Stroll')}`, '_blank');
+        });
+
+        document.getElementById('shareCopy').addEventListener('click', () => {
+            navigator.clipboard.writeText(getShareText()).then(() => showToast('Link copied!'));
+        });
+
+        // ==================== DEVELOPER SHARE ====================
+        document.getElementById('shareDevBtn').addEventListener('click', () => {
+            const text = "Try Stroll - an app that generates perfect walking routes in seconds. No planning needed. Free & indie-built 🚶 https://strollapp.app";
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text + ' #IndieHackers')}`, '_blank');
+        });
+
+        // ==================== STRAVA ====================
+        document.getElementById('stravaBtn').addEventListener('click', () => {
+            const stravaURL = `https://www.strava.com/routes/create`;
+            window.open(stravaURL, '_blank');
+            showToast('Opening Strava. Add your route there!');
+        });
+
+        // ==================== NEW ROUTE ====================
+        document.getElementById('newRouteBtn').addEventListener('click', () => {
+            document.getElementById('routeResults').classList.add('hidden');
+        });
+
+        // ==================== CHALLENGES ====================
+        function renderChallenges() {
+            const list = document.getElementById('challengesList');
+            list.innerHTML = state.challenges.map(c => `
+                <div class="challenge-card">
+                    <div class="challenge-title">${c.badge} ${c.title}</div>
+                    <div style="font-size: 12px; color: var(--color-text-light);">${c.current}/${c.target}</div>
+                    <div class="challenge-progress">
+                        <div class="challenge-progress-bar" style="width: ${(c.current / c.target) * 100}%"></div>
+                    </div>
+                </div>
+            `).join('');
+
+            const badges = document.getElementById('badgesDisplay');
+            badges.textContent = state.badges.length > 0 ? state.badges.join(' ') : 'No badges yet. Complete challenges!';
+        }
+
+        // ==================== HISTORY ====================
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            if (state.savedRoutes.length === 0) {
+                list.innerHTML = '';
+                return;
+            }
+
+            list.innerHTML = state.savedRoutes.map(route => `
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; margin-bottom: 12px; border: 1px solid var(--color-border);">
+                    <div style="font-weight: 700; margin-bottom: 6px; color: var(--color-text);">${route.distance}km • ${route.time}min</div>
+                    <div style="font-size: 12px; color: var(--color-text-light);">Rating: ${'⭐'.repeat(route.rating || 0)}</div>
+                    <button class="btn" style="width: 100%; margin-top: 10px; font-size: 12px; padding: 10px; border: 1.5px solid var(--color-border); background: var(--color-bg); border-radius: 8px;">Repeat This Route</button>
+                </div>
+            `).join('');
+        }
+
+        // ==================== SETTINGS ====================
+        document.getElementById('settingsBtn').addEventListener('click', () => {
+            document.getElementById('settingsModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeSettingsBtn').addEventListener('click', () => {
+            document.getElementById('settingsModal').style.display = 'none';
+        });
+
+        // ==================== DARK MODE ====================
+        document.getElementById('darkModeBtn').addEventListener('click', () => {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            localStorage.setItem('theme', isDark ? 'light' : 'dark');
+        });
+
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+
+        // ==================== UTILITIES ====================
+        function showError(msg) {
+            const box = document.getElementById('errorBox');
+            if (box) {
+                box.textContent = msg;
+                box.classList.remove('hidden');
+                setTimeout(() => box.classList.add('hidden'), 5000);
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2000);
+        }
+    </script>
+</body>
+</html>
