@@ -1,0 +1,13 @@
+[build]
+command = "echo 'build complete'"
+publish = "."
+functions = "netlify/functions"
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200
+
+[functions]
+directory = "netlify/functions"
+node_bundler = "esbuild"
