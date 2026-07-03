@@ -813,7 +813,6 @@
                         </div>
 
                         <div>
-                            <button class="btn btn-primary" id="stravaBtn" style="margin-top: 16px;">Export to Strava</button>
                             <button class="btn" id="saveRouteBtn" style="width: 100%; margin-top: 10px; padding: 12px; border: 1.5px solid var(--color-border); background: var(--color-bg-alt); border-radius: 8px; font-weight: 600;">❤️ Save Route</button>
                             <button class="btn" id="newRouteBtn" style="width: 100%; margin-top: 10px; padding: 12px; border: 1.5px solid var(--color-border); background: var(--color-bg-alt); border-radius: 8px; font-weight: 600;">Generate Another</button>
                         </div>
@@ -857,7 +856,7 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settingsModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000;">
+    <div id="settingsModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000;">
         <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 80vh; overflow-y: auto;">
             <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700;">Settings</h2>
             
@@ -1160,8 +1159,8 @@
         });
 
         function displayRoute() {
-            const results = document.getElementById('routeResults');
-            results.classList.remove('hidden');
+            const modal = document.getElementById('resultsModal');
+            modal.style.display = 'flex';
 
             const km = state.currentRoute.distance || 3.2;
             const miles = (km * 0.621371).toFixed(1);
@@ -1170,17 +1169,10 @@
             const elevationGain = state.difficulty === 'easy' ? '50-100 ft' : state.difficulty === 'moderate' ? '100-200 ft' : '200+ ft';
             document.getElementById('resultDifficulty').textContent = `${state.difficulty.charAt(0).toUpperCase() + state.difficulty.slice(1)} • ${elevationGain} elevation`;
 
-            document.getElementById('resultCalories').textContent = `~${state.currentRoute.calories} cal`;
-
-            const surface = state.preferences.paved ? '95% paved, 5% trails' : '75% paved, 25% trails';
-            document.getElementById('resultSurface').textContent = surface;
-
             // DRAW MAP
             setTimeout(() => {
                 drawMap(state.currentRoute.coordinates);
             }, 100);
-
-            window.scrollTo({ top: results.offsetTop, behavior: 'smooth' });
         }
 
         function drawMap(coordinates) {
@@ -1309,13 +1301,6 @@
             window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text + ' #IndieHackers')}`, '_blank');
         });
 
-        // ==================== STRAVA ====================
-        document.getElementById('stravaBtn').addEventListener('click', () => {
-            const stravaURL = `https://www.strava.com/routes/create`;
-            window.open(stravaURL, '_blank');
-            showToast('Opening Strava. Add your route there!');
-        });
-
         // ==================== NEW ROUTE ====================
         document.getElementById('newRouteBtn').addEventListener('click', () => {
             document.getElementById('routeResults').classList.add('hidden');
@@ -1356,12 +1341,49 @@
         }
 
         // ==================== SETTINGS ====================
+        // Settings button
         document.getElementById('settingsBtn').addEventListener('click', () => {
             document.getElementById('settingsModal').style.display = 'flex';
         });
 
         document.getElementById('closeSettingsBtn').addEventListener('click', () => {
             document.getElementById('settingsModal').style.display = 'none';
+        });
+
+        // Stats button
+        document.getElementById('statsBtn').addEventListener('click', () => {
+            alert('📊 Stats: You can track your routes and progress in the History tab!');
+        });
+
+        // Results modal
+        document.getElementById('closeResultsModal').addEventListener('click', () => {
+            document.getElementById('resultsModal').style.display = 'none';
+        });
+
+        document.getElementById('newRouteBtn').addEventListener('click', () => {
+            document.getElementById('resultsModal').style.display = 'none';
+        });
+
+        // Share buttons
+        document.getElementById('shareTwitter').addEventListener('click', () => {
+            const text = `Just generated a ${state.currentRoute.distance}km walk with Stroll! Try it: strollapp.netlify.app`;
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+        });
+
+        document.getElementById('shareWhatsApp').addEventListener('click', () => {
+            const text = `Check out this ${state.currentRoute.distance}km walk I generated with Stroll! strollapp.netlify.app`;
+            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+        });
+
+        document.getElementById('shareCopy').addEventListener('click', () => {
+            navigator.clipboard.writeText('strollapp.netlify.app').then(() => alert('Copied: strollapp.netlify.app'));
+        });
+
+        // Rating
+        document.getElementById('ratingInput').addEventListener('click', (e) => {
+            if (e.target.textContent === '⭐') {
+                alert('Route rated! Thanks for the feedback!');
+            }
         });
 
         // ==================== DARK MODE ====================
@@ -1393,5 +1415,48 @@
             setTimeout(() => toast.remove(), 2000);
         }
     </script>
+
+    <!-- Results Modal Popup -->
+    <div id="resultsModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: flex-end; z-index: 2000; animation: slideUp 0.3s ease-out;">
+        <div style="background: white; width: 100%; max-height: 90vh; border-radius: 20px 20px 0 0; overflow-y: auto; padding: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="font-size: 20px; font-weight: 700; margin: 0;">Your Route</h2>
+                <button id="closeResultsModal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b9080; padding: 0;">✕</button>
+            </div>
+            <div id="map" style="width: 100%; height: 300px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #ddd;"></div>
+            <div style="background: #f8f9f8; border-radius: 12px; padding: 18px; border: 1px solid #e8eae6;">
+                <div style="margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid #e8eae6;">
+                    <div style="font-size: 11px; text-transform: uppercase; color: #6b9080; font-weight: 700; margin-bottom: 6px;">Distance</div>
+                    <div id="resultDistance" style="font-size: 15px; font-weight: 600;">-</div>
+                </div>
+                <div style="margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid #e8eae6;">
+                    <div style="font-size: 11px; text-transform: uppercase; color: #6b9080; font-weight: 700; margin-bottom: 6px;">Elevation Gain</div>
+                    <div id="resultDifficulty" style="font-size: 15px; font-weight: 600;">-</div>
+                </div>
+                <div style="margin-bottom: 14px;">
+                    <div style="font-size: 11px; text-transform: uppercase; color: #6b9080; font-weight: 700; margin-bottom: 6px;">Rate This Route</div>
+                    <div id="ratingInput" style="font-size: 26px; letter-spacing: 10px; cursor: pointer; margin-top: 10px;">⭐⭐⭐⭐⭐</div>
+                </div>
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e8eae6;">
+                    <div style="font-size: 11px; text-transform: uppercase; color: #6b9080; font-weight: 700; margin-bottom: 10px;">Share This Route</div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                        <button id="shareTwitter" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">𝕏</button>
+                        <button id="shareWhatsApp" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">💬</button>
+                        <button id="shareCopy" style="padding: 11px; font-size: 13px; font-weight: 600; border: 1.5px solid #e8eae6; background: #f8f9f8; border-radius: 8px; cursor: pointer;">📋</button>
+                    </div>
+                </div>
+                <button id="newRouteBtn" style="width: 100%; background: #6b9080; color: white; padding: 16px; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 16px;">Generate Another</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(100px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .hidden { display: none !important; }
+    </style>
+
 </body>
 </html>
