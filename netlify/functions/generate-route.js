@@ -1,45 +1,16 @@
 /**
- * STROLL OS DATA ROUTER - GITHUB RELEASE VERSION
+ * STROLL OSRM ROUTER WITH ROAD EXCLUSIONS
  * 
- * Uses OS Open Roads data hosted on GitHub Releases
- * Fetches and decompresses regional data on demand
- * Builds local graph, routes via Dijkstra
- * Guaranteed to use only government-verified pedestrian infrastructure
+ * Uses OSRM foot profile with motorway/trunk/primary exclusions
+ * Fast, reliable, proven routing without major roads
+ * Fallback circle if routing fails
  */
-
-const zlib = require('zlib');
-
-// Update this URL monthly when new data is released
-const DATA_BASE_URL = 'https://github.com/TakingTimeBack/Stroll/releases/download/os-roads-20260704/';
-
-// Map postcode prefixes to regions
-const postcodeToRegion = {
-  // Southeast
-  'GU': 'SE', 'RH': 'SE', 'TN': 'SE', 'CT': 'SE', 'ME': 'SE', 'DA': 'SE', 'BR': 'SE',
-  'KT': 'SE', 'SM': 'SE', 'SG': 'SE', 'EN': 'SE', 'RM': 'SE', 'SS': 'SE',
-  // Southwest
-  'BA': 'SW', 'BH': 'SW', 'DT': 'SW', 'EX': 'SW', 'PL': 'SW', 'TQ': 'SW', 'TR': 'SW',
-  // Midlands
-  'WS': 'M', 'WV': 'M', 'DY': 'M', 'CV': 'M', 'WR': 'M', 'GL': 'M', 'LE': 'M', 'LN': 'M', 'NG': 'M', 'DE': 'M',
-  // Birmingham
-  'B': 'B',
-  // Northwest
-  'CH': 'NW', 'CW': 'NW', 'L': 'NW', 'M': 'NW', 'PR': 'NW', 'SK': 'NW', 'WA': 'NW', 'CA': 'NW',
-  // Northeast
-  'BD': 'NE', 'DH': 'NE', 'DN': 'NE', 'HX': 'NE', 'LS': 'NE', 'SR': 'NE', 'TS': 'NE', 'YO': 'NE',
-  // East
-  'CB': 'E', 'NR': 'E', 'PE': 'E', 'IP': 'E',
-  // Wales
-  'CF': 'W', 'HR': 'W', 'LD': 'W', 'LL': 'W', 'NP': 'W', 'SA': 'W', 'SY': 'W',
-  // London/East Central
-  'EC': 'EC', 'N': 'EC', 'NW': 'EC', 'SW': 'EC', 'W': 'EC', 'E': 'EC'
-};
 
 exports.handler = async (event) => {
   const LOG = [];
   
   try {
-    LOG.push('=== STROLL OS DATA ROUTER (GITHUB) ===');
+    LOG.push('=== STROLL OSRM ROUTER (EXCLUSIONS) ===');
     
     let body;
     try {
@@ -66,68 +37,20 @@ exports.handler = async (event) => {
     const targetKm = (time / 60) * pace;
     LOG.push(`TARGET: ${targetKm.toFixed(2)}km`);
 
-    // EXTRACT POSTCODE REGION
-    LOG.push('STEP: Determining OS region');
-    const region = extractRegionFromPostcode(location);
-    LOG.push(`REGION: ${region}`);
-
-    // LOAD OS DATA FROM GITHUB
-    LOG.push('STEP: Fetching OS Open Roads data');
-    const regionData = await loadRegionDataFromGitHub(region);
-    
-    if (!regionData || !regionData.ways || regionData.ways.length === 0) {
-      LOG.push('WARN: No pedestrian ways in region');
-      const fallback = generateFallbackCircle(lat, lng, targetKm);
-      return respond(200, {
-        coordinates: fallback.coords,
-        distance: fallback.dist,
-        elevation: Math.round(50 + fallback.dist / 2),
-        duration: time,
-        location,
-        pattern: 'fallback-circle',
-        success: true,
-        warning: 'Limited pedestrian data',
-        debug: LOG
-      });
-    }
-
-    LOG.push(`WAYS: ${regionData.ways.length} pedestrian-safe ways`);
-
-    // BUILD GRAPH
-    LOG.push('STEP: Building pedestrian graph');
-    const graph = buildGraph(regionData.ways, lat, lng);
-    LOG.push(`GRAPH: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
-
-    if (graph.nodes.length < 3) {
-      LOG.push('WARN: Graph too small, fallback');
-      const fallback = generateFallbackCircle(lat, lng, targetKm);
-      return respond(200, {
-        coordinates: fallback.coords,
-        distance: fallback.dist,
-        elevation: Math.round(50 + fallback.dist / 2),
-        duration: time,
-        location,
-        pattern: 'fallback-circle',
-        success: true,
-        warning: 'Insufficient connected paths',
-        debug: LOG
-      });
-    }
-
-    // GENERATE RANDOM WAYPOINTS
-    LOG.push('STEP: Generating random waypoints');
-    const radius = Math.min(0.3, targetKm / 10);
+    // Generate random waypoints in a circle
+    LOG.push('STEP: Generating waypoints');
+    const radius = Math.min(0.4, targetKm / 8);
     const waypoints = generateRandomWaypoints(lat, lng, radius, 4);
     LOG.push(`WAYPOINTS: ${waypoints.length}`);
 
-    // ROUTE BETWEEN WAYPOINTS
-    LOG.push('STEP: Routing via pedestrian network');
+    // Route via OSRM with exclusions
+    LOG.push('STEP: Routing via OSRM (excluding motorway/trunk/primary)');
     const coordinates = [];
     let lastPoint = { lat, lng };
 
     for (let i = 0; i < waypoints.length; i++) {
       const wp = waypoints[i];
-      const segment = dijkstraRoute(graph, lastPoint, wp);
+      const segment = await routeViaOSRM(lastPoint, wp);
       
       if (segment && segment.length > 0) {
         if (i === 0) {
@@ -138,19 +61,21 @@ exports.handler = async (event) => {
         lastPoint = wp;
         LOG.push(`  ✓ Segment ${i + 1}: ${segment.length} points`);
       } else {
-        LOG.push(`  ✗ Segment ${i + 1}: no route`);
+        LOG.push(`  ✗ Segment ${i + 1}: failed, fallback`);
       }
     }
 
-    // RETURN TO START
-    const finalSeg = dijkstraRoute(graph, lastPoint, { lat, lng });
+    // Return to start
+    LOG.push('STEP: Return to start');
+    const finalSeg = await routeViaOSRM(lastPoint, { lat, lng });
     if (finalSeg && finalSeg.length > 0) {
       coordinates.push(...finalSeg.slice(1));
       LOG.push(`  ✓ Return: ${finalSeg.length} points`);
     }
 
+    // If no valid routes, use circle
     if (coordinates.length < 2) {
-      LOG.push('FAIL: No valid route');
+      LOG.push('WARN: No valid routes via OSRM, using fallback circle');
       const fallback = generateFallbackCircle(lat, lng, targetKm);
       return respond(200, {
         coordinates: fallback.coords,
@@ -160,28 +85,28 @@ exports.handler = async (event) => {
         location,
         pattern: 'fallback-circle',
         success: true,
-        warning: 'Could not route',
+        warning: 'Used geometric fallback (no routes found)',
         debug: LOG
       });
     }
 
-    // CALCULATE DISTANCE
+    // Calculate distance
     let totalDist = 0;
     for (let i = 0; i < coordinates.length - 1; i++) {
-      totalDist += haversine(coordinates[i].lat, coordinates[i].lng, 
-                            coordinates[i + 1].lat, coordinates[i + 1].lng);
+      totalDist += haversine(coordinates[i][0], coordinates[i][1], 
+                            coordinates[i + 1][0], coordinates[i + 1][1]);
     }
 
     LOG.push(`SUCCESS: ${coordinates.length} points, ${totalDist.toFixed(2)}km`);
 
     return respond(200, {
-      coordinates: coordinates.map(c => [c.lat, c.lng]),
+      coordinates,
       distance: parseFloat(totalDist.toFixed(2)),
       elevation: Math.round(50 + totalDist / 2),
       duration: time,
       location,
-      pattern: 'os-pedestrian',
-      source: 'Ordnance Survey Open Roads',
+      pattern: 'osrm-pedestrian',
+      source: 'OSRM Foot Profile',
       success: true,
       debug: LOG
     });
@@ -224,188 +149,28 @@ async function geocodeFinal(location) {
 }
 
 // ============================================================================
-// FETCH FROM GITHUB RELEASE
+// ROUTE VIA OSRM WITH EXCLUSIONS
 // ============================================================================
 
-async function loadRegionDataFromGitHub(region) {
-  return new Promise((resolve) => {
-    try {
-      const https = require('https');
-      const url = `${DATA_BASE_URL}${region}.json.gz`;
-      
-      console.log(`Fetching: ${url}`);
-      
-      https.get(url, { timeout: 30000 }, (res) => {
-        if (res.statusCode !== 200) {
-          console.error(`GitHub returned ${res.statusCode}`);
-          resolve(null);
-          return;
-        }
-        
-        let data = Buffer.alloc(0);
-        
-        res.on('data', (chunk) => {
-          data = Buffer.concat([data, chunk]);
-        });
-        
-        res.on('end', () => {
-          console.log(`Received ${data.length} bytes`);
-          
-          zlib.gunzip(data, (err, decompressed) => {
-            if (err) {
-              console.error(`Decompression failed: ${err.message}`);
-              resolve(null);
-              return;
-            }
-            
-            try {
-              const json = JSON.parse(decompressed.toString());
-              console.log(`Parsed JSON: ${json.ways ? json.ways.length : 0} ways`);
-              resolve(json);
-            } catch (parseErr) {
-              console.error(`Parse failed: ${parseErr.message}`);
-              resolve(null);
-            }
-          });
-        });
-      }).on('error', (err) => {
-        console.error(`HTTPS error: ${err.message}`);
-        resolve(null);
-      });
-    } catch (err) {
-      console.error(`Load error: ${err.message}`);
-      resolve(null);
-    }
-  });
-}
-
-// ============================================================================
-// GRAPH BUILDING
-// ============================================================================
-
-function buildGraph(ways, centerLat, centerLng) {
-  const nodeMap = new Map();
-  const edges = [];
-  let nodeId = 0;
-
-  const getOrCreateNode = (lat, lng) => {
-    const key = `${lat.toFixed(6)},${lng.toFixed(6)}`;
-    if (!nodeMap.has(key)) {
-      nodeMap.set(key, {
-        id: nodeId++,
-        lat,
-        lng,
-        edges: []
-      });
-    }
-    return nodeMap.get(key);
-  };
-
-  for (const way of ways) {
-    const wayNodes = way.nodes.map(n => getOrCreateNode(n.lat, n.lng));
-
-    for (let i = 0; i < wayNodes.length - 1; i++) {
-      const from = wayNodes[i];
-      const to = wayNodes[i + 1];
-      const dist = haversine(from.lat, from.lng, to.lat, to.lng);
-
-      edges.push({ from: from.id, to: to.id, dist });
-      from.edges.push(edges.length - 1);
-
-      edges.push({ from: to.id, to: from.id, dist });
-      to.edges.push(edges.length - 1);
-    }
-  }
-
-  const nodes = Array.from(nodeMap.values());
-  return { nodes, edges, nodeMap };
-}
-
-// ============================================================================
-// DIJKSTRA ROUTING
-// ============================================================================
-
-function dijkstraRoute(graph, start, end) {
-  const { nodes, edges } = graph;
-  
-  let startNode = nodes[0];
-  let endNode = nodes[0];
-  let startDist = Infinity;
-  let endDist = Infinity;
-
-  for (const node of nodes) {
-    const dStart = Math.abs(node.lat - start.lat) + Math.abs(node.lng - start.lng);
-    const dEnd = Math.abs(node.lat - end.lat) + Math.abs(node.lng - end.lng);
+async function routeViaOSRM(from, to) {
+  try {
+    // OSRM foot profile with motorway/trunk/primary exclusions
+    const url = `https://router.project-osrm.org/route/v1/foot/${from.lng},${from.lat};${to.lng},${to.lat}?geometries=geojson&exclude=motorway,trunk,primary`;
     
-    if (dStart < startDist) {
-      startNode = node;
-      startDist = dStart;
-    }
-    if (dEnd < endDist) {
-      endNode = node;
-      endDist = dEnd;
-    }
-  }
+    const response = await fetch(url, { timeout: 10000 });
+    const data = await response.json();
 
-  if (startDist > 0.01 || endDist > 0.01) return null;
-
-  const dist = new Map();
-  const prev = new Map();
-  const unvisited = new Set();
-
-  for (const node of nodes) {
-    dist.set(node.id, Infinity);
-    unvisited.add(node.id);
-  }
-
-  dist.set(startNode.id, 0);
-  const nodeById = {};
-  for (const n of nodes) nodeById[n.id] = n;
-
-  while (unvisited.size > 0) {
-    let current = null;
-    let minDist = Infinity;
-
-    for (const nodeId of unvisited) {
-      if (dist.get(nodeId) < minDist) {
-        minDist = dist.get(nodeId);
-        current = nodeId;
-      }
+    if (!data.routes || data.routes.length === 0) {
+      return null;
     }
 
-    if (current === null || current === endNode.id) break;
-
-    unvisited.delete(current);
-    const currentNode = nodeById[current];
-
-    for (const edgeIdx of currentNode.edges) {
-      const edge = edges[edgeIdx];
-      const neighbor = edge.to;
-
-      if (!unvisited.has(neighbor)) continue;
-
-      const alt = dist.get(current) + edge.dist;
-      if (alt < dist.get(neighbor)) {
-        dist.set(neighbor, alt);
-        prev.set(neighbor, current);
-      }
-    }
-  }
-
-  if (!prev.has(endNode.id) && endNode.id !== startNode.id) {
+    const route = data.routes[0];
+    const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    
+    return coords;
+  } catch (err) {
     return null;
   }
-
-  const path = [];
-  let current = endNode.id;
-
-  while (current !== undefined) {
-    const node = nodeById[current];
-    path.unshift({ lat: node.lat, lng: node.lng });
-    current = prev.get(current);
-  }
-
-  return path.length > 1 ? path : null;
 }
 
 // ============================================================================
@@ -471,15 +236,6 @@ function generateFallbackCircle(lat, lng, targetKm) {
 // ============================================================================
 // UTILS
 // ============================================================================
-
-function extractRegionFromPostcode(location) {
-  const match = location.toUpperCase().match(/([A-Z]{1,2})/);
-  if (match) {
-    const prefix = match[1];
-    return postcodeToRegion[prefix] || 'SE';
-  }
-  return 'SE';
-}
 
 function haversine(lat1, lng1, lat2, lng2) {
   const R = 6371;
