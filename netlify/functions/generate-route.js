@@ -110,18 +110,17 @@ async function geocodeLocation(location) {
 async function fetchPedestrianWays(lat, lng, radiusMeters) {
   const radiusDegrees = radiusMeters / 111000; // 1 degree ≈ 111km
 
-  // Overpass QL query for pedestrian-friendly ways
+  // Overpass QL query - STRICT pedestrian ways only
   const query = `
     [bbox:${lat - radiusDegrees},${lng - radiusDegrees},${lat + radiusDegrees},${lng + radiusDegrees}];
     (
       way["highway"="footway"];
-      way["highway"="path"]["foot"!="no"];
-      way["highway"="residential"];
-      way["highway"="living_street"];
+      way["highway"="path"];
       way["highway"="pedestrian"];
       way["leisure"="park"];
       way["leisure"="garden"];
-      way["access"="public"]["foot"!="no"];
+      way["leisure"="pitch"];
+      way["access"="public"];
     );
     out geom;
   `;
@@ -130,7 +129,7 @@ async function fetchPedestrianWays(lat, lng, radiusMeters) {
     const response = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
       body: query,
-      timeout: 15000
+      timeout: 20000
     });
 
     if (!response.ok) {
@@ -140,13 +139,25 @@ async function fetchPedestrianWays(lat, lng, radiusMeters) {
 
     const data = await response.json();
     
-    // Convert Overpass ways to simple format
-    return (data.ways || []).map(way => ({
-      id: way.id,
-      nodes: way.geometry.map(g => ({ lat: g.lat, lon: g.lon })),
-      type: way.tags?.highway || way.tags?.leisure || 'path',
-      name: way.tags?.name || null
-    })).filter(way => way.nodes.length > 1);
+    // Convert Overpass ways to simple format with filtering
+    return (data.ways || [])
+      .map(way => ({
+        id: way.id,
+        nodes: way.geometry.map(g => ({ lat: g.lat, lon: g.lon })),
+        type: way.tags?.highway || way.tags?.leisure || 'path',
+        name: way.tags?.name || null,
+        access: way.tags?.access
+      }))
+      .filter(way => 
+        way.nodes.length > 1 &&
+        way.access !== 'private' &&
+        way.access !== 'no'
+      )
+      .sort((a, b) => {
+        // Prioritize footpaths
+        const typeOrder = { footway: 5, path: 4, pedestrian: 4, park: 3, garden: 3, pitch: 2 };
+        return (typeOrder[b.type] || 0) - (typeOrder[a.type] || 0);
+      });
 
   } catch (err) {
     console.warn('Overpass fetch error:', err.message);
@@ -209,7 +220,7 @@ function buildGraph(ways, centerLat, centerLng) {
 }
 
 // ============================================================
-// CIRCULAR ROUTE GENERATION
+// CIRCULAR ROUTE GENERATION - IMPROVED
 // ============================================================
 
 function generateCircularRoute(graph, centerLat, centerLng, targetDistance, preferences) {
@@ -217,110 +228,188 @@ function generateCircularRoute(graph, centerLat, centerLng, targetDistance, pref
   if (nodes.length < 3) return null;
 
   // Find starting node closest to center
-  let startNode = nodes[0];
-  let minDist = startNode.distToCenter;
-  for (const node of nodes) {
-    if (node.distToCenter < minDist) {
-      minDist = node.distToCenter;
-      startNode = node;
-    }
-  }
+  let startNode = nodes.reduce((best, node) => 
+    node.distToCenter < best.distToCenter ? node : best
+  );
 
-  // Build adjacency map for faster access
+  // Build adjacency with way type weights (prefer footpaths)
   const adjacency = {};
+  const wayWeights = {
+    'footway': 1.0,
+    'path': 0.95,
+    'pedestrian': 0.9,
+    'residential': 0.7,
+    'living_street': 0.8,
+    'park': 0.9,
+    'garden': 0.9
+  };
+
   for (const node of nodes) {
     adjacency[node.id] = [];
   }
+
   for (const edge of edges) {
-    adjacency[edge.from].push(edge);
+    const weight = wayWeights[edge.type] || 0.5;
+    adjacency[edge.from].push({
+      ...edge,
+      weight
+    });
   }
 
-  // Greedy circular walk: go out, explore, return
+  // Smart circular walk using weighted graph traversal
   const route = [startNode];
   const visited = new Set([startNode.id]);
   let currentDist = 0;
-  let phase = 'explore'; // explore → return
-
   let currentNode = startNode;
-  const maxIterations = 200;
-  let iterations = 0;
+  let direction = 'outward'; // outward → homeward
 
-  while (iterations < maxIterations) {
+  const maxIterations = 300;
+  let iterations = 0;
+  const distThreshold = targetDistance * 0.8; // When to start returning
+
+  while (iterations < maxIterations && currentDist < targetDistance * 1.1) {
     iterations++;
 
-    // Get available next nodes
-    const availableEdges = (adjacency[currentNode.id] || [])
-      .filter(edge => !visited.has(edge.to));
+    // Get valid next edges (prefer high-weight ways, avoid backtracking)
+    const validEdges = (adjacency[currentNode.id] || [])
+      .filter(edge => !visited.has(edge.to))
+      .sort((a, b) => b.weight - a.weight); // Prefer footpaths
 
-    if (availableEdges.length === 0) {
-      // Dead end, find nearest visited node with unexplored edges
-      const nodeWithOptions = nodes.find(n =>
-        visited.has(n.id) &&
-        (adjacency[n.id] || []).some(e => !visited.has(e.to))
+    if (validEdges.length === 0) {
+      // Hit dead end, try to backtrack to find unvisited paths
+      const unvisitedNodes = nodes.filter(n => !visited.has(n.id));
+      if (unvisitedNodes.length === 0) break;
+
+      // Find nearest unvisited node and path to it
+      const nearest = unvisitedNodes.reduce((best, n) =>
+        haversine(currentNode.lat, currentNode.lon, n.lat, n.lon) <
+        haversine(currentNode.lat, currentNode.lon, best.lat, best.lon)
+          ? n : best
       );
 
-      if (!nodeWithOptions) break;
-      currentNode = nodeWithOptions;
+      const pathToNearest = findShortestPath(currentNode.id, nearest.id, adjacency, visited);
+      if (pathToNearest && pathToNearest.length > 0) {
+        for (const nodeId of pathToNearest) {
+          const node = nodes[nodeId];
+          currentDist += haversine(currentNode.lat, currentNode.lon, node.lat, node.lon);
+          visited.add(nodeId);
+          route.push(node);
+          currentNode = node;
+        }
+      } else {
+        break;
+      }
       continue;
     }
 
-    // Smart edge selection
+    // Choose next edge strategically
     let nextEdge;
-    if (phase === 'explore') {
-      if (currentDist < targetDistance * 0.6) {
-        // Go away from center
-        nextEdge = availableEdges.reduce((best, edge) => {
-          const nextNode = nodes[edge.to];
-          const newDistToCenter = haversine(
-            nextNode.lat, nextNode.lon,
-            centerLat, centerLng
-          );
-          return newDistToCenter > (nodes[best.to].distToCenter || 0) ? edge : best;
-        });
-      } else {
-        // Start returning
-        phase = 'return';
-        nextEdge = availableEdges.reduce((best, edge) => {
-          const nextNode = nodes[edge.to];
-          const newDistToCenter = haversine(
-            nextNode.lat, nextNode.lon,
-            centerLat, centerLng
-          );
-          return newDistToCenter < (nodes[best.to].distToCenter || Infinity) ? edge : best;
-        });
-      }
-    } else {
-      // Return phase - prefer nodes closer to center
-      nextEdge = availableEdges.reduce((best, edge) => {
+
+    if (direction === 'outward' && currentDist < distThreshold) {
+      // Move away from center, prefer high-weight ways
+      nextEdge = validEdges.reduce((best, edge) => {
         const nextNode = nodes[edge.to];
-        const newDistToCenter = haversine(
+        const distFromCenter = haversine(nextNode.lat, nextNode.lon, centerLat, centerLng);
+        const nextDistFromCenter = haversine(
           nextNode.lat, nextNode.lon,
           centerLat, centerLng
         );
-        return newDistToCenter < (nodes[best.to].distToCenter || Infinity) ? edge : best;
+        
+        // Prefer moving outward AND high-quality ways
+        return (nextDistFromCenter > distFromCenter && edge.weight > (best.weight || 0))
+          ? edge : best;
       });
+
+      if (!nextEdge) {
+        nextEdge = validEdges[0]; // Fallback to best way available
+      }
+    } else {
+      // Return phase - prefer ways that go homeward
+      direction = 'homeward';
+      nextEdge = validEdges.reduce((best, edge) => {
+        const nextNode = nodes[edge.to];
+        const nextDistFromCenter = haversine(
+          nextNode.lat, nextNode.lon,
+          centerLat, centerLng
+        );
+        const currentDistFromCenter = currentNode.distToCenter;
+
+        // Prefer getting closer to center AND high-quality ways
+        return (nextDistFromCenter < currentDistFromCenter || edge.weight > (best.weight || 0))
+          ? edge : best;
+      });
+
+      if (!nextEdge) {
+        nextEdge = validEdges[0];
+      }
     }
 
     // Move to next node
     const nextNode = nodes[nextEdge.to];
-    currentDist += nextEdge.distance;
+    const segmentDist = nextEdge.distance;
+    
+    currentDist += segmentDist;
     visited.add(nextNode.id);
     route.push(nextNode);
     currentNode = nextNode;
-
-    // Stop if we've achieved target distance
-    if (currentDist >= targetDistance * 0.9) break;
   }
 
-  // Convert route to coordinates
-  const coordinates = route.map(node => [node.lat, node.lon]);
+  // Simplify route - reduce noise by removing nearby consecutive points
+  const simplified = simplifyRoute(route);
+  const coordinates = simplified.map(node => [node.lat, node.lon]);
 
   return {
     coordinates,
     distance: currentDist,
     nodes: route.length,
-    phases: 'explore-return'
+    simplified: simplified.length
   };
+}
+
+// Simple pathfinding to escape dead ends
+function findShortestPath(startId, endId, adjacency, visited) {
+  if (startId === endId) return [endId];
+
+  const queue = [[startId]];
+  const seen = new Set([startId]);
+
+  while (queue.length > 0) {
+    const path = queue.shift();
+    const current = path[path.length - 1];
+
+    if (current === endId) {
+      return path.slice(1); // Exclude start
+    }
+
+    for (const edge of (adjacency[current] || [])) {
+      if (!seen.has(edge.to) && !visited.has(edge.to)) {
+        seen.add(edge.to);
+        queue.push([...path, edge.to]);
+      }
+    }
+  }
+
+  return null;
+}
+
+// Simplify route by removing redundant points that are too close
+function simplifyRoute(route) {
+  if (route.length < 3) return route;
+
+  const simplified = [route[0]];
+  const minDistance = 0.0001; // ~11 meters
+
+  for (let i = 1; i < route.length; i++) {
+    const last = simplified[simplified.length - 1];
+    const current = route[i];
+
+    const dist = haversine(last.lat, last.lon, current.lat, current.lon);
+    if (dist > minDistance) {
+      simplified.push(current);
+    }
+  }
+
+  return simplified;
 }
 
 // ============================================================
