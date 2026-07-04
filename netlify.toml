@@ -1,18 +1,33 @@
 [build]
-command = "echo 'build complete'"
-publish = "."
-functions = "netlify/functions"
+  # Pull Git LFS files before building
+  command = "git lfs pull && echo 'LFS files downloaded, Stroll ready to deploy!'"
+  # Functions are in the netlify folder
+  functions = "netlify/functions"
+  # Publish the root directory
+  publish = "."
 
+# Redirect all routes to index.html (for SPA support)
 [[redirects]]
-from = "/*"
-to = "/index.html"
-status = 200
+  from = "/*"
+  to = "/index.html"
+  status = 200
 
+# Allow CORS for API calls to functions
 [[headers]]
-for = "/service-worker.js"
-[headers.values]
-Content-Type = "application/javascript; charset=utf-8"
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type"
 
-[functions]
-directory = "netlify/functions"
-node_bundler = "esbuild"
+# Cache settings for performance
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+# Don't cache the HTML file (so updates appear immediately)
+[[headers]]
+  for = "*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
