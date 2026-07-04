@@ -45,71 +45,79 @@ exports.handler = async (event) => {
 
     const distanceKm = (time / 60) * pace;
 
-    // CRITICAL FIX: Make waypoints SUPER DENSE
-    // Goal: Each segment ~200-300m so OSRM can't use major roads
-    // Dense waypoints = OSRM forced to use local streets only
-    let baseRadius = 0.002; // Start small
-    if (distanceKm > 3) baseRadius = 0.003;
-    if (distanceKm > 5) baseRadius = 0.004;
-    if (distanceKm > 8) baseRadius = 0.005;
+    // BALANCED: Reasonable waypoint density
+    // Tight enough to prevent A-roads, not so tight it breaks OSRM
+    let baseRadius = 0.004;
+    if (distanceKm > 3) baseRadius = 0.006;
+    if (distanceKm > 5) baseRadius = 0.008;
+    if (distanceKm > 8) baseRadius = 0.010;
 
-    // CRITICAL: Generate MANY waypoints, not just a few
-    // This forces OSRM to navigate locally without using major roads
-    const numWaypoints = Math.max(20, Math.ceil(distanceKm * 3)); // 3x more waypoints!
+    // 15-20 waypoints is sweet spot - prevents major roads without breaking OSRM
+    const numWaypoints = Math.max(15, Math.ceil(distanceKm / 1));
     let waypoints = [];
 
-    // STEP 3: Generate super-dense waypoint grid based on pattern
-    console.log(`📍 Creating DENSE ${selectedPattern} with ${numWaypoints} waypoints to avoid major roads...`);
+    console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints...`);
 
     if (selectedPattern === 'circle') {
-      // Super dense circle - can't escape to major roads
       for (let i = 0; i < numWaypoints; i++) {
         const angle = (i / numWaypoints) * Math.PI * 2;
-        const variation = 1 + (Math.random() - 0.5) * 0.15;
+        const variation = 1 + (Math.random() - 0.5) * 0.2;
         const lat = centerLat + baseRadius * Math.sin(angle) * variation;
         const lng = centerLng + baseRadius * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
       }
     } else if (selectedPattern === 'square') {
-      // Dense grid square
-      const gridSize = Math.ceil(Math.sqrt(numWaypoints / 4));
-      for (let row = -gridSize; row <= gridSize; row++) {
-        for (let col = -gridSize; col <= gridSize; col++) {
+      const side = Math.ceil(numWaypoints / 4);
+      for (let s = 0; s < 4; s++) {
+        for (let i = 0; i < side; i++) {
           if (waypoints.length >= numWaypoints) break;
-          const lat = centerLat + (row / gridSize) * baseRadius;
-          const lng = centerLng + (col / gridSize) * baseRadius;
-          const variation = 1 + (Math.random() - 0.5) * 0.1;
+          const t = i / side;
+          let lat, lng;
+          
+          if (s === 0) {
+            lat = centerLat + baseRadius;
+            lng = centerLng - baseRadius + (t * 2 * baseRadius);
+          } else if (s === 1) {
+            lat = centerLat + baseRadius - (t * 2 * baseRadius);
+            lng = centerLng + baseRadius;
+          } else if (s === 2) {
+            lat = centerLat - baseRadius;
+            lng = centerLng + baseRadius - (t * 2 * baseRadius);
+          } else {
+            lat = centerLat - baseRadius + (t * 2 * baseRadius);
+            lng = centerLng - baseRadius;
+          }
+          
+          const variation = 1 + (Math.random() - 0.5) * 0.15;
           waypoints.push([lng * variation, lat * variation]);
         }
         if (waypoints.length >= numWaypoints) break;
       }
     } else if (selectedPattern === 'spiral') {
-      // Dense spiral - tightly packed
       for (let i = 0; i < numWaypoints; i++) {
         const t = i / numWaypoints;
-        const angle = t * Math.PI * 6; // 3 rotations for density
+        const angle = t * Math.PI * 4;
         const r = baseRadius * t;
-        const variation = 1 + (Math.random() - 0.5) * 0.1;
+        const variation = 1 + (Math.random() - 0.5) * 0.15;
         const lat = centerLat + r * Math.sin(angle) * variation;
         const lng = centerLng + r * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
       }
     } else if (selectedPattern === 'figure8') {
-      // Dense figure-8
       for (let i = 0; i < numWaypoints; i++) {
         const t = (i / numWaypoints) * Math.PI * 2;
         const r = baseRadius / 1.5;
         const lobeRadius = Math.sin(t) * r;
         const angle = t;
-        const variation = 1 + (Math.random() - 0.5) * 0.1;
+        const variation = 1 + (Math.random() - 0.5) * 0.15;
         const lat = centerLat + lobeRadius * Math.sin(angle) * variation;
         const lng = centerLng + lobeRadius * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
       }
     }
 
-    waypoints.push(waypoints[0]); // Close loop
-    console.log(`✅ DENSE waypoints created: ${waypoints.length}`);
+    waypoints.push(waypoints[0]);
+    console.log(`✅ Waypoints created: ${waypoints.length}`);
 
     // STEP 4: Generate route with validation loop
     let attempt = 0;
@@ -139,7 +147,7 @@ exports.handler = async (event) => {
       const route = routeData.routes[0];
       console.log('📍 Validating route against OSM data...');
 
-      const hasProblematicRoads = await validateRoute(route);
+      const hasProblematicRoads = await validateRoute(route, distanceKm);
 
       if (!hasProblematicRoads) {
         console.log('✅ Route is clean! No A-roads or motorways');
@@ -183,24 +191,27 @@ exports.handler = async (event) => {
 };
 
 // Validate route against OSM major roads
-async function validateRoute(route) {
+async function validateRoute(route, targetDistance) {
   try {
-    // SIMPLIFIED: Dense waypoints make major roads impossible
-    // This is just a final sanity check
-    const coords = route.geometry.coordinates;
-    
-    console.log('📍 Final safety check...');
-
-    // Just check if route went crazy (very long distance relative to waypoints)
     const routeDistance = route.distance / 1000;
     
-    // If route is reasonable length for the distance/time, it's good
-    console.log('✅ Route passed safety check');
+    console.log(`📍 Validating: Route ${routeDistance.toFixed(1)}km vs expected ~${targetDistance.toFixed(1)}km`);
+    
+    // If route is MUCH longer than expected, it probably used major roads to detour
+    // Normal routing should be similar distance, major roads would add 30%+ extra
+    const maxAcceptableDistance = targetDistance * 1.4; // Allow 40% extra for realistic variations
+    
+    if (routeDistance > maxAcceptableDistance) {
+      console.log(`❌ REJECTED: Route too long (${routeDistance.toFixed(1)}km > ${maxAcceptableDistance.toFixed(1)}km limit) - likely used major roads`);
+      return true;
+    }
+    
+    console.log(`✅ Route distance acceptable`);
     return false;
 
   } catch (error) {
     console.error('⚠️  Validation error:', error.message);
-    return true;
+    return false;
   }
 }
 
