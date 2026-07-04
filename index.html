@@ -835,6 +835,9 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script>
+        // Wait for DOM to be fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded, attaching button handlers...');
         // ==================== STATE MANAGEMENT ====================
         const state = {
             location: null,
@@ -1201,29 +1204,10 @@
             });
         });
 
-        // ==================== SAVE ROUTE ====================
-        document.getElementById('saveRouteBtn').addEventListener('click', () => {
-            if (state.currentRoute) {
-                const existing = state.savedRoutes.find(r => r.id === state.currentRoute.id);
-                if (!existing) {
-                    state.savedRoutes.push(state.currentRoute);
-                    saveToStorage();
-                    showToast('❤️ Route saved!');
-                } else {
-                    showToast('Already saved');
-                }
-            }
-        });
-
         // ==================== SHARING ====================
         function getShareText() {
             return `Just generated an awesome ${state.currentRoute.distance}km walk with Stroll! Generated in seconds, took hours. 🚶 ${window.location.href}`;
         }
-
-        // ==================== NEW ROUTE ====================
-        document.getElementById('newRouteBtn').addEventListener('click', () => {
-            document.getElementById('routeResults').classList.add('hidden');
-        });
 
         // ==================== CHALLENGES ====================
         function renderChallenges() {
@@ -1349,6 +1333,7 @@
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 2000);
         }
+        }); // End DOMContentLoaded
     </script>
 
     <!-- Results Modal Popup -->
