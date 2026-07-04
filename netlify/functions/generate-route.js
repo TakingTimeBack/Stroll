@@ -10,16 +10,27 @@ const fs = require('fs');
 const zlib = require('zlib');
 const path = require('path');
 
-// Map postcode prefixes to regions
+// Map postcode prefixes to regions (by first 1-2 letters)
 const postcodeToRegion = {
+  // Southeast
   'GU': 'SE', 'RH': 'SE', 'TN': 'SE', 'CT': 'SE', 'ME': 'SE', 'DA': 'SE', 'BR': 'SE',
+  'KT': 'SE', 'SM': 'SE', 'SG': 'SE', 'EN': 'SE', 'RM': 'SE', 'SS': 'SE',
+  // Southwest
   'BA': 'SW', 'BH': 'SW', 'DT': 'SW', 'EX': 'SW', 'PL': 'SW', 'TQ': 'SW', 'TR': 'SW',
-  'WS': 'M', 'WV': 'M', 'DY': 'M', 'B': 'B', 'CV': 'M', 'WR': 'M', 'GL': 'M',
+  // Midlands
+  'WS': 'M', 'WV': 'M', 'DY': 'M', 'CV': 'M', 'WR': 'M', 'GL': 'M', 'LE': 'M', 'LN': 'M', 'NG': 'M', 'DE': 'M',
+  // Birmingham
+  'B': 'B',
+  // Northwest
   'CH': 'NW', 'CW': 'NW', 'L': 'NW', 'M': 'NW', 'PR': 'NW', 'SK': 'NW', 'WA': 'NW', 'CA': 'NW',
-  'BD': 'NE', 'DH': 'NE', 'DN': 'NE', 'HX': 'NE', 'LS': 'NE', 'NE': 'NE', 'SR': 'NE', 'TS': 'NE', 'YO': 'NE',
-  'CB': 'E', 'LN': 'E', 'NR': 'E', 'PE': 'E',
+  // Northeast
+  'BD': 'NE', 'DH': 'NE', 'DN': 'NE', 'HX': 'NE', 'LS': 'NE', 'SR': 'NE', 'TS': 'NE', 'YO': 'NE',
+  // East
+  'CB': 'E', 'NR': 'E', 'PE': 'E', 'IP': 'E',
+  // Wales
   'CF': 'W', 'HR': 'W', 'LD': 'W', 'LL': 'W', 'NP': 'W', 'SA': 'W', 'SY': 'W',
-  'EC': 'EC', 'N': 'EC', 'NW': 'EC', 'SW': 'EC', 'W': 'EC'
+  // London/East Central
+  'EC': 'EC', 'N': 'EC', 'NW': 'EC', 'SW': 'EC', 'W': 'EC', 'E': 'EC'
 };
 
 exports.handler = async (event) => {
@@ -225,18 +236,21 @@ function extractRegionFromPostcode(location) {
 
 async function loadRegionData(region) {
   return new Promise((resolve, reject) => {
-    const filePath = path.join(__dirname, '..', 'data', 'os-roads', `${region}.json.gz`);
+    // File path from Netlify function location (netlify/functions/generate-route.js)
+    // Goes up to root, then into data/os-roads/
+    const filePath = path.join(__dirname, '..', '..', 'data', 'os-roads', `${region}.json.gz`);
     
     fs.readFile(filePath, (err, data) => {
       if (err) {
-        console.error(`Could not load ${region} data:`, err.message);
+        console.error(`Could not load ${region} data: ${err.message}`);
+        console.error(`Tried path: ${filePath}`);
         resolve(null);
         return;
       }
 
       zlib.gunzip(data, (err, decompressed) => {
         if (err) {
-          console.error(`Could not decompress ${region} data:`, err.message);
+          console.error(`Could not decompress ${region} data: ${err.message}`);
           resolve(null);
           return;
         }
@@ -245,7 +259,7 @@ async function loadRegionData(region) {
           const json = JSON.parse(decompressed.toString());
           resolve(json);
         } catch (parseErr) {
-          console.error(`Could not parse ${region} data:`, parseErr.message);
+          console.error(`Could not parse ${region} data: ${parseErr.message}`);
           resolve(null);
         }
       });
