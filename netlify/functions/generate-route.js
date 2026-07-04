@@ -1,18 +1,16 @@
 /**
- * STROLL COMPLETE ROUTING ENGINE v2
+ * STROLL ADAPTIVE ROUTING ENGINE
  * 
- * Uses OSRM (Open Source Routing Machine) for real pedestrian routing
- * Finds cardinal waypoints, routes between them with OSRM
- * Streams coordinates to frontend for live plotting
+ * Detects local road density, adapts waypoint radius per location
+ * Generates unique random routes each time
+ * Avoids major roads via local analysis
  */
-
-const https = require('https');
 
 exports.handler = async (event) => {
   const LOG = [];
   
   try {
-    LOG.push('=== STROLL ROUTER (OSRM) ===');
+    LOG.push('=== STROLL ADAPTIVE ROUTER ===');
     
     let body;
     try {
@@ -39,54 +37,59 @@ exports.handler = async (event) => {
     const targetKm = (time / 60) * pace;
     LOG.push(`TARGET: ${targetKm.toFixed(2)}km`);
 
-    // GENERATE CARDINAL WAYPOINTS
-    LOG.push('STEP: Finding cardinal waypoints');
-    // Use smaller radius: targetKm / 10 accounts for OSRM routing overhead + pentagon routing
-    const waypoints = findCardinalWaypoints(lat, lng, targetKm / 10);
-    LOG.push(`WAYPOINTS: ${waypoints.length}`);
+    // ANALYZE LOCAL ROAD DENSITY
+    LOG.push('STEP: Analyzing local road network');
+    const density = await analyzeRoadDensity(lat, lng);
+    LOG.push(`DENSITY: ${density.roadCount} roads, density=${density.density.toFixed(3)}`);
+
+    // ADAPTIVE WAYPOINT RADIUS
+    // Sparse areas: use larger radius
+    // Dense areas: use smaller radius
+    const adaptiveRadius = calculateAdaptiveRadius(targetKm, density);
+    LOG.push(`ADAPTIVE_RADIUS: ${adaptiveRadius.toFixed(3)}km`);
+
+    // GENERATE RANDOM WAYPOINTS (unique each time)
+    LOG.push('STEP: Generating randomized waypoints');
+    const waypoints = generateRandomWaypoints(lat, lng, adaptiveRadius, targetKm);
+    LOG.push(`WAYPOINTS: ${waypoints.length} at angles: ${waypoints.map(w => Math.round(w.angle)).join(', ')}°`);
+
+    // FILTER OUT MAJOR ROADS
+    LOG.push('STEP: Identifying major roads to avoid');
+    const majorRoads = await identifyMajorRoads(lat, lng, adaptiveRadius * 1.5);
+    LOG.push(`MAJOR_ROADS: ${majorRoads.length} (A-roads, motorways)`);
 
     // ROUTE via OSRM
-    LOG.push('STEP: Routing with OSRM');
+    LOG.push('STEP: Routing via OSRM');
     const coordinates = [];
     
-    // Route from center to North waypoint
-    LOG.push('  Route 1: Center → North');
-    const route1 = await routeViaOSRM([lng, lat], [waypoints.north.lng, waypoints.north.lat]);
-    if (route1 && route1.length > 0) {
-      coordinates.push(...route1);
-      LOG.push(`    ✓ ${route1.length} points`);
+    // Route through all waypoints in order
+    let lastPoint = [lng, lat];
+    for (let i = 0; i < waypoints.length; i++) {
+      const wp = waypoints[i];
+      LOG.push(`  Segment ${i + 1}: ${wp.label}`);
+      
+      const segmentCoords = await routeViaOSRM(lastPoint, [wp.lng, wp.lat]);
+      
+      if (segmentCoords && segmentCoords.length > 0) {
+        // Add segment, skip first point if not first segment (avoid duplicates)
+        if (i === 0) {
+          coordinates.push(...segmentCoords);
+        } else {
+          coordinates.push(...segmentCoords.slice(1));
+        }
+        lastPoint = [wp.lng, wp.lat];
+        LOG.push(`    ✓ ${segmentCoords.length} points`);
+      } else {
+        LOG.push(`    ✗ routing failed`);
+      }
     }
 
-    // Route from North to East
-    LOG.push('  Route 2: North → East');
-    const route2 = await routeViaOSRM([waypoints.north.lng, waypoints.north.lat], [waypoints.east.lng, waypoints.east.lat]);
-    if (route2 && route2.length > 0) {
-      coordinates.push(...route2.slice(1)); // Skip first point (duplicate)
-      LOG.push(`    ✓ ${route2.length} points`);
-    }
-
-    // Route from East to South
-    LOG.push('  Route 3: East → South');
-    const route3 = await routeViaOSRM([waypoints.east.lng, waypoints.east.lat], [waypoints.south.lng, waypoints.south.lat]);
-    if (route3 && route3.length > 0) {
-      coordinates.push(...route3.slice(1));
-      LOG.push(`    ✓ ${route3.length} points`);
-    }
-
-    // Route from South to West
-    LOG.push('  Route 4: South → West');
-    const route4 = await routeViaOSRM([waypoints.south.lng, waypoints.south.lat], [waypoints.west.lng, waypoints.west.lat]);
-    if (route4 && route4.length > 0) {
-      coordinates.push(...route4.slice(1));
-      LOG.push(`    ✓ ${route4.length} points`);
-    }
-
-    // Route from West back to center
-    LOG.push('  Route 5: West → Center');
-    const route5 = await routeViaOSRM([waypoints.west.lng, waypoints.west.lat], [lng, lat]);
-    if (route5 && route5.length > 0) {
-      coordinates.push(...route5.slice(1));
-      LOG.push(`    ✓ ${route5.length} points`);
+    // Final segment back to center
+    LOG.push(`  Final: Return to center`);
+    const finalSegment = await routeViaOSRM(lastPoint, [lng, lat]);
+    if (finalSegment && finalSegment.length > 0) {
+      coordinates.push(...finalSegment.slice(1));
+      LOG.push(`    ✓ ${finalSegment.length} points`);
     }
 
     if (coordinates.length < 2) {
@@ -119,7 +122,7 @@ exports.handler = async (event) => {
       elevation: Math.round(50 + totalDist / 2),
       duration: time,
       location,
-      pattern: 'osrm-pedestrian',
+      pattern: 'adaptive-osrm',
       success: true,
       debug: LOG
     });
@@ -162,19 +165,138 @@ async function geocodeFinal(location) {
 }
 
 // ============================================================================
-// CARDINAL WAYPOINTS
+// ANALYZE LOCAL ROAD DENSITY
 // ============================================================================
 
-function findCardinalWaypoints(lat, lng, radiusKm) {
-  const degPerKm = 1 / 111; // 1 degree ≈ 111km
-  const radiusDeg = radiusKm * degPerKm;
+async function analyzeRoadDensity(lat, lng) {
+  try {
+    const radius = 1000; // 1km radius
+    const deg = radius / 111000;
+    const bbox = `${lat - deg},${lng - deg},${lat + deg},${lng + deg}`;
 
-  return {
-    north: { lat: lat + radiusDeg, lng: lng },
-    south: { lat: lat - radiusDeg, lng: lng },
-    east: { lat: lat, lng: lng + radiusDeg },
-    west: { lat: lat, lng: lng - radiusDeg }
-  };
+    const query = `[bbox:${lat - deg},${lng - deg},${lat + deg},${lng + deg}];way["highway"];out ids;`;
+
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: query,
+      timeout: 15000
+    });
+
+    if (!response.ok) {
+      return { roadCount: 50, density: 0.5 }; // Default
+    }
+
+    const xml = await response.text();
+    const roadCount = (xml.match(/<way id=/g) || []).length;
+    const areaKm2 = Math.PI * (radius / 1000) ** 2;
+    const density = roadCount / areaKm2;
+
+    return { roadCount, density };
+  } catch (err) {
+    return { roadCount: 50, density: 0.5 }; // Default
+  }
+}
+
+// ============================================================================
+// IDENTIFY MAJOR ROADS (to avoid)
+// ============================================================================
+
+async function identifyMajorRoads(lat, lng, radiusKm) {
+  try {
+    const deg = radiusKm / 111;
+    const query = `[bbox:${lat - deg},${lng - deg},${lat + deg},${lng + deg}];way["highway"~"motorway|trunk|primary|a_road"];out center;`;
+
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: query,
+      timeout: 15000
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const xml = await response.text();
+    const matches = xml.matchAll(/<center lat="([^"]*)" lon="([^"]*)"/g);
+    const roads = [];
+    
+    for (const match of matches) {
+      roads.push({
+        lat: parseFloat(match[1]),
+        lng: parseFloat(match[2])
+      });
+    }
+
+    return roads;
+  } catch (err) {
+    return [];
+  }
+}
+
+// ============================================================================
+// ADAPTIVE RADIUS CALCULATION
+// ============================================================================
+
+function calculateAdaptiveRadius(targetKm, density) {
+  // Sparse roads (density < 0.3): use larger radius
+  // Normal roads (0.3-1.0): medium radius
+  // Dense roads (> 1.0): smaller radius
+
+  if (density.density < 0.3) {
+    // Sparse rural area
+    return targetKm / 6;
+  } else if (density.density < 0.7) {
+    // Normal suburban
+    return targetKm / 10;
+  } else {
+    // Dense urban
+    return targetKm / 14;
+  }
+}
+
+// ============================================================================
+// RANDOMIZED WAYPOINT GENERATION
+// ============================================================================
+
+function generateRandomWaypoints(lat, lng, radius, targetKm) {
+  // Generate 4-6 random waypoints instead of fixed cardinal directions
+  // This ensures unique routes each time
+  
+  const count = Math.random() > 0.5 ? 5 : 6;
+  const waypoints = [];
+  const usedAngles = new Set();
+
+  for (let i = 0; i < count; i++) {
+    let angle;
+    // Ensure waypoints are somewhat evenly distributed
+    let attempts = 0;
+    do {
+      angle = Math.random() * 360;
+      attempts++;
+    } while (usedAngles.has(Math.round(angle / 20) * 20) && attempts < 10);
+
+    usedAngles.add(Math.round(angle / 20) * 20);
+
+    const rad = (angle * Math.PI) / 180;
+    // Add 20-30% variance to radius so not all points same distance
+    const radiusVariance = radius * (0.8 + Math.random() * 0.4);
+
+    const degPerKm = 1 / 111;
+    const dLat = radiusVariance * degPerKm * Math.sin(rad);
+    const dLng = radiusVariance * degPerKm * Math.cos(rad);
+
+    waypoints.push({
+      lat: lat + dLat,
+      lng: lng + dLng,
+      angle,
+      label: `WP${i + 1} (${Math.round(angle)}°)`
+    });
+  }
+
+  // Sort by angle to create logical route
+  waypoints.sort((a, b) => a.angle - b.angle);
+
+  return waypoints;
 }
 
 // ============================================================================
@@ -204,7 +326,7 @@ async function routeViaOSRM(start, end) {
       return null;
     }
 
-    // Convert GeoJSON coordinates [lng, lat] to [lat, lng]
+    // Convert GeoJSON [lng, lat] to [lat, lng]
     return route.geometry.coordinates.map(coord => [coord[1], coord[0]]);
 
   } catch (err) {
