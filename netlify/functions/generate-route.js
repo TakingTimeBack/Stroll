@@ -37,33 +37,22 @@ exports.handler = async (event) => {
     const distanceKm = (time / 60) * pace;
     console.log('📍 Distance target:', distanceKm, 'km');
 
-    // STEP 2: Choose random route pattern for variety
-    console.log('📍 Selecting route pattern...');
+    // STEP 2: Smart radius - proportional to distance
+    // For center→out→return pattern: actual distance = 2 × radius
+    // So: radius_km = target_distance_km / 2
+    // Then convert to degrees: radius_deg = radius_km / 111
+    
+    let baseRadius = (distanceKm / 2) / 111; // Convert km to degrees
+    
+    // Clamp between reasonable bounds
+    baseRadius = Math.max(0.003, Math.min(0.025, baseRadius));
+    
+    console.log(`📍 Radius: ${baseRadius.toFixed(4)}° = ${(baseRadius * 111).toFixed(0)}m (for ${distanceKm.toFixed(1)}km target)`);
+
+    // Choose random pattern for variety
     const patterns = ['circle', 'square', 'spiral', 'figure8'];
     const selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
     console.log('✅ Route pattern:', selectedPattern);
-
-    // VERY CONSERVATIVE RADIUS: Small and tight for all walk distances
-    let baseRadius;
-    
-    if (distanceKm < 1.5) {
-      baseRadius = 0.0006; // ~65m for very short walks (15-20 min)
-    } else if (distanceKm < 2.5) {
-      baseRadius = 0.0009; // ~100m for short walks (20-30 min)
-    } else if (distanceKm < 3.5) {
-      baseRadius = 0.0012; // ~130m for medium walks
-    } else if (distanceKm < 5) {
-      baseRadius = 0.0016; // ~180m (1h walk - 4km)
-    } else if (distanceKm < 7) {
-      baseRadius = 0.0022; // ~245m (1.5h walk - 6km)
-    } else if (distanceKm < 10) {
-      baseRadius = 0.0028; // ~310m (2h walk - 8km)
-    } else {
-      baseRadius = 0.0035; // ~390m for long walks
-    }
-
-    // STEP 3: Create natural circular walk with pattern variation
-    console.log(`📍 Creating natural ${selectedPattern} walk...`);
 
     let waypoints = [];
     waypoints.push([centerLng, centerLat]); // Start at center
