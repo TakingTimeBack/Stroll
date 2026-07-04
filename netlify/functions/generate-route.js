@@ -43,16 +43,31 @@ exports.handler = async (event) => {
     const selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
     console.log('✅ Route pattern:', selectedPattern);
 
-    // REASONABLE: 12-18 waypoints - works with OSRM
-    let baseRadius = 0.004;
-    if (distanceKm > 3) baseRadius = 0.006;
-    if (distanceKm > 5) baseRadius = 0.008;
-    if (distanceKm > 8) baseRadius = 0.010;
+    // SMART RADIUS: Scale with distance so waypoints aren't too spread out
+    // Short walks (20m): tiny area (~200m) | Long walks (2h): large area (~1.2km)
+    let baseRadius;
+    
+    if (distanceKm < 1.5) {
+      baseRadius = 0.0012; // ~120m for very short walks (15-20 min)
+    } else if (distanceKm < 2.5) {
+      baseRadius = 0.0018; // ~180m for short walks (20-30 min)
+    } else if (distanceKm < 3.5) {
+      baseRadius = 0.003; // ~300m for medium walks
+    } else if (distanceKm < 5) {
+      baseRadius = 0.0045; // ~450m
+    } else if (distanceKm < 7) {
+      baseRadius = 0.006; // ~600m
+    } else if (distanceKm < 10) {
+      baseRadius = 0.008; // ~800m
+    } else {
+      baseRadius = 0.010; // ~1000m for long walks
+    }
 
-    const numWaypoints = Math.max(12, Math.ceil(distanceKm / 0.8));
+    // Adjust waypoint count based on distance
+    const numWaypoints = Math.max(10, Math.min(20, Math.ceil(distanceKm * 3)));
     let waypoints = [];
 
-    console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints (distance: ${distanceKm.toFixed(1)}km)...`);
+    console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints, radius ${(baseRadius * 111).toFixed(0)}m (distance: ${distanceKm.toFixed(1)}km)...`);
 
     if (selectedPattern === 'circle') {
       for (let i = 0; i < numWaypoints; i++) {

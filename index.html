@@ -623,21 +623,304 @@
             transition: width 0.3s;
         }
 
-        @media (max-width: 480px) {
+        @media (max-width: 768px) {
+            .container {
+                padding: 0;
+            }
+
+            header {
+                padding: 14px 16px;
+                gap: 8px;
+            }
+
+            .header-logo {
+                height: 32px;
+            }
+
+            .tagline {
+                font-size: 12px;
+            }
+
             main {
-                padding: 16px;
+                padding: 12px;
+            }
+
+            .control-group {
+                margin-bottom: 18px;
+            }
+
+            .control-label {
+                font-size: 11px;
+                margin-bottom: 10px;
             }
 
             .button-group {
-                grid-template-columns: repeat(4, 1fr);
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+
+            .btn, .btn-option {
+                padding: 10px 12px;
+                font-size: 12px;
+            }
+
+            .btn-primary {
+                padding: 12px 16px;
+                font-size: 13px;
+            }
+
+            .toggle-group {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .toggle-item {
+                padding: 11px 12px;
+            }
+
+            .toggle-label {
+                font-size: 12px;
             }
 
             .share-buttons {
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .download-buttons {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
             }
 
             .welcome-content {
-                padding: 40px 24px;
+                padding: 32px 20px;
+                max-width: 100%;
+                border-radius: 16px;
+            }
+
+            .welcome-content h1 {
+                font-size: 28px;
+                margin-bottom: 8px;
+            }
+
+            .welcome-content p {
+                font-size: 13px;
+            }
+
+            .welcome-features {
+                gap: 16px;
+                margin: 20px 0;
+            }
+
+            .feature-item {
+                gap: 10px;
+            }
+
+            .feature-item .emoji {
+                font-size: 28px;
+            }
+
+            .feature-item span {
+                font-size: 12px;
+            }
+
+            .tab-nav {
+                gap: 4px;
+                padding: 8px;
+            }
+
+            .tab-btn {
+                padding: 10px 12px;
+                font-size: 12px;
+            }
+
+            .icon-btn {
+                width: 36px;
+                height: 36px;
+                font-size: 18px;
+            }
+
+            .modal {
+                padding: 0;
+            }
+
+            .modal > div {
+                max-height: 90vh;
+                max-width: 95vw;
+                border-radius: 16px;
+            }
+
+            input, select {
+                padding: 12px;
+                font-size: 16px;
+            }
+
+            .gps-button {
+                padding: 10px;
+            }
+
+            #modalMap {
+                height: 250px;
+            }
+
+            .route-info {
+                padding: 12px;
+                margin: 12px 0;
+            }
+
+            .route-info h3 {
+                font-size: 13px;
+                margin-bottom: 6px;
+            }
+
+            .route-info p {
+                font-size: 12px;
+                margin-bottom: 4px;
+            }
+
+            .route-info .info-value {
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            .stars {
+                font-size: 24px;
+                gap: 4px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            header {
+                padding: 12px 12px;
+            }
+
+            .header-left {
+                gap: 6px;
+            }
+
+            .header-logo {
+                height: 28px;
+            }
+
+            .tagline {
+                font-size: 11px;
+            }
+
+            .header-right {
+                gap: 6px;
+            }
+
+            .icon-btn {
+                width: 32px;
+                height: 32px;
+                font-size: 16px;
+            }
+
+            main {
+                padding: 10px;
+            }
+
+            .button-group {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 6px;
+            }
+
+            .btn {
+                padding: 9px 10px;
+                font-size: 11px;
+            }
+
+            .btn-primary {
+                padding: 11px 14px;
+                font-size: 12px;
+            }
+
+            .toggle-item {
+                padding: 10px;
+                gap: 8px;
+            }
+
+            .toggle-label {
+                font-size: 11px;
+            }
+
+            .toggle-switch {
+                width: 40px;
+                height: 22px;
+            }
+
+            .toggle-switch::before {
+                width: 18px;
+                height: 18px;
+            }
+
+            .toggle-switch.active::before {
+                left: 18px;
+            }
+
+            .tab-nav {
+                gap: 2px;
+                padding: 6px;
+            }
+
+            .tab-btn {
+                padding: 8px 10px;
+                font-size: 11px;
+            }
+
+            .share-buttons {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            .download-buttons {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            #modalMap {
+                height: 200px;
+            }
+
+            .route-info {
+                padding: 10px;
+                margin: 10px 0;
+            }
+
+            input, select {
+                padding: 11px;
+                font-size: 16px;
+            }
+
+            .control-label {
+                font-size: 10px;
+            }
+
+            .welcome-content {
+                padding: 24px 16px;
+            }
+
+            .welcome-content h1 {
+                font-size: 24px;
+            }
+
+            .welcome-content p {
+                font-size: 12px;
+            }
+
+            .welcome-features {
+                gap: 12px;
+                margin: 16px 0;
+            }
+
+            .feature-item .emoji {
+                font-size: 24px;
+            }
+
+            .stars {
+                font-size: 20px;
+                gap: 3px;
             }
         }
     </style>
@@ -940,30 +1223,56 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/service-worker.js')
-                    .then(reg => console.log('✅ Service Worker registered'))
+                    .then(reg => {
+                        console.log('✅ Service Worker registered');
+                        // Also check for app install state
+                        if (window.matchMedia('(display-mode: standalone)').matches) {
+                            console.log('✅ App already installed');
+                            document.getElementById('pwaInstallBtn').style.display = 'none';
+                        }
+                    })
                     .catch(err => console.log('⚠️ Service Worker registration failed:', err));
             });
         }
 
         // PWA Install Prompt
-        let deferredPrompt;
+        let deferredPrompt = null;
+        let canShowPrompt = true;
+
+        // Check if already installed
+        window.addEventListener('load', () => {
+            if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
+                console.log('✅ Running as standalone app');
+                document.getElementById('pwaInstallBtn').style.display = 'none';
+            }
+        });
+
         window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('📱 beforeinstallprompt fired - browser supports PWA');
             e.preventDefault();
             deferredPrompt = e;
-            console.log('📱 PWA install prompt available');
             
-            // Show install button after a delay
+            // Show install button
+            const pwaBtn = document.getElementById('pwaInstallBtn');
+            if (pwaBtn) {
+                pwaBtn.style.display = 'block';
+                console.log('📱 Install button shown');
+            }
+            
+            // Show popup hint first time (delayed)
             setTimeout(() => {
-                const pwaBtn = document.getElementById('pwaInstallBtn');
-                if (pwaBtn) {
-                    pwaBtn.style.display = 'block';
-                }
-                // Show popup hint first time
-                if (!localStorage.getItem('pwaPromptSeen')) {
+                if (!localStorage.getItem('pwaPromptSeen') && canShowPrompt) {
                     showPwaPrompt();
                     localStorage.setItem('pwaPromptSeen', 'true');
+                    console.log('📱 PWA popup shown');
                 }
-            }, 1000);
+            }, 2000);
+        });
+
+        window.addEventListener('appinstalled', () => {
+            console.log('✅ PWA app installed successfully');
+            document.getElementById('pwaInstallBtn').style.display = 'none';
+            deferredPrompt = null;
         });
 
         function showPwaPrompt() {
