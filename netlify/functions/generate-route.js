@@ -43,8 +43,6 @@ exports.handler = async (event) => {
     const selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
     console.log('✅ Route pattern:', selectedPattern);
 
-    const distanceKm = (time / 60) * pace;
-
     // BALANCED: Reasonable waypoint density
     // Tight enough to prevent A-roads, not so tight it breaks OSRM
     let baseRadius = 0.004;
@@ -193,24 +191,18 @@ exports.handler = async (event) => {
 // Validate route against OSM major roads
 async function validateRoute(route, targetDistance) {
   try {
+    // Simple check: if route is TOO long, it probably used major roads
     const routeDistance = route.distance / 1000;
+    const maxAcceptable = targetDistance * 1.5; // Allow 50% extra
     
-    console.log(`📍 Validating: Route ${routeDistance.toFixed(1)}km vs expected ~${targetDistance.toFixed(1)}km`);
-    
-    // If route is MUCH longer than expected, it probably used major roads to detour
-    // Normal routing should be similar distance, major roads would add 30%+ extra
-    const maxAcceptableDistance = targetDistance * 1.4; // Allow 40% extra for realistic variations
-    
-    if (routeDistance > maxAcceptableDistance) {
-      console.log(`❌ REJECTED: Route too long (${routeDistance.toFixed(1)}km > ${maxAcceptableDistance.toFixed(1)}km limit) - likely used major roads`);
+    if (routeDistance > maxAcceptable) {
+      console.log(`❌ Route too long: ${routeDistance.toFixed(1)}km > ${maxAcceptable.toFixed(1)}km`);
       return true;
     }
     
-    console.log(`✅ Route distance acceptable`);
+    console.log(`✅ Route distance OK: ${routeDistance.toFixed(1)}km`);
     return false;
-
-  } catch (error) {
-    console.error('⚠️  Validation error:', error.message);
+  } catch (e) {
     return false;
   }
 }
