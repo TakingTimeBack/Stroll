@@ -230,21 +230,28 @@ async function geocodeFinal(location) {
 async function loadRegionDataFromGitHub(region) {
   return new Promise((resolve) => {
     try {
+      const https = require('https');
       const url = `${DATA_BASE_URL}${region}.json.gz`;
       
-      fetch(url, { timeout: 30000 })
-        .then(res => {
-          if (!res.ok) {
-            console.error(`GitHub fetch failed: ${res.status}`);
-            resolve(null);
-            return;
-          }
-          return res.arrayBuffer();
-        })
-        .then(buffer => {
-          if (!buffer) return;
+      console.log(`Fetching: ${url}`);
+      
+      https.get(url, { timeout: 30000 }, (res) => {
+        if (res.statusCode !== 200) {
+          console.error(`GitHub returned ${res.statusCode}`);
+          resolve(null);
+          return;
+        }
+        
+        let data = Buffer.alloc(0);
+        
+        res.on('data', (chunk) => {
+          data = Buffer.concat([data, chunk]);
+        });
+        
+        res.on('end', () => {
+          console.log(`Received ${data.length} bytes`);
           
-          zlib.gunzip(Buffer.from(buffer), (err, decompressed) => {
+          zlib.gunzip(data, (err, decompressed) => {
             if (err) {
               console.error(`Decompression failed: ${err.message}`);
               resolve(null);
@@ -253,17 +260,18 @@ async function loadRegionDataFromGitHub(region) {
             
             try {
               const json = JSON.parse(decompressed.toString());
+              console.log(`Parsed JSON: ${json.ways ? json.ways.length : 0} ways`);
               resolve(json);
             } catch (parseErr) {
               console.error(`Parse failed: ${parseErr.message}`);
               resolve(null);
             }
           });
-        })
-        .catch(err => {
-          console.error(`GitHub fetch error: ${err.message}`);
-          resolve(null);
         });
+      }).on('error', (err) => {
+        console.error(`HTTPS error: ${err.message}`);
+        resolve(null);
+      });
     } catch (err) {
       console.error(`Load error: ${err.message}`);
       resolve(null);
