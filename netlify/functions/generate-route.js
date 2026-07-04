@@ -57,7 +57,7 @@ exports.handler = async (event) => {
     if (selectedPattern === 'circle') {
       for (let i = 0; i < numWaypoints; i++) {
         const angle = (i / numWaypoints) * Math.PI * 2;
-        const variation = 1 + (Math.random() - 0.5) * 0.2;
+        const variation = 1 + (Math.random() - 0.5) * 0.4; // Stronger randomization
         const lat = centerLat + baseRadius * Math.sin(angle) * variation;
         const lng = centerLng + baseRadius * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
@@ -84,7 +84,7 @@ exports.handler = async (event) => {
             lng = centerLng - baseRadius;
           }
           
-          const variation = 1 + (Math.random() - 0.5) * 0.15;
+          const variation = 1 + (Math.random() - 0.5) * 0.3; // Stronger randomization
           waypoints.push([lng * variation, lat * variation]);
         }
         if (waypoints.length >= numWaypoints) break;
@@ -94,7 +94,7 @@ exports.handler = async (event) => {
         const t = i / numWaypoints;
         const angle = t * Math.PI * 4;
         const r = baseRadius * t;
-        const variation = 1 + (Math.random() - 0.5) * 0.15;
+        const variation = 1 + (Math.random() - 0.5) * 0.3; // Stronger randomization
         const lat = centerLat + r * Math.sin(angle) * variation;
         const lng = centerLng + r * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
@@ -105,7 +105,7 @@ exports.handler = async (event) => {
         const r = baseRadius / 1.5;
         const lobeRadius = Math.sin(t) * r;
         const angle = t;
-        const variation = 1 + (Math.random() - 0.5) * 0.15;
+        const variation = 1 + (Math.random() - 0.5) * 0.3; // Stronger randomization
         const lat = centerLat + lobeRadius * Math.sin(angle) * variation;
         const lng = centerLng + lobeRadius * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
@@ -115,62 +115,31 @@ exports.handler = async (event) => {
     waypoints.push(waypoints[0]);
     console.log(`✅ Waypoints created: ${waypoints.length}`);
 
-    // STEP 4: Generate route (with 5 retry attempts)
-    let attempt = 0;
+    // STEP 4: Generate route - single attempt, accept first success
+    console.log(`📍 Routing with ${numWaypoints} waypoints...`);
+
+    const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
+    const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
+
     let validRoute = null;
 
-    while (attempt < 5 && !validRoute) {
-      attempt++;
-      console.log(`📍 Route generation attempt ${attempt}/5...`);
+    try {
+      const routeResponse = await fetch(routeUrl, { timeout: 10000 });
 
-      const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
-      const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
-
-      try {
-        const routeResponse = await fetch(routeUrl);
-
-        if (!routeResponse.ok) {
-          console.log('❌ OSRM request failed');
-          continue;
-        }
-
+      if (routeResponse.ok) {
         const routeData = await routeResponse.json();
 
-        if (routeData.code !== 'Ok' || !routeData.routes || routeData.routes.length === 0) {
-          console.log('❌ OSRM no route');
-          continue;
+        if (routeData.code === 'Ok' && routeData.routes && routeData.routes.length > 0) {
+          validRoute = routeData.routes[0];
+          console.log(`✅ Route generated: ${(validRoute.distance / 1000).toFixed(1)}km`);
         }
-
-        const route = routeData.routes[0];
-        
-        // Validate distance first
-        if (!validateRoute(route, distanceKm)) {
-          console.log('❌ Distance validation failed');
-          continue;
-        }
-        
-        // Then check for major roads
-        const hasMajorRoads = await checkForMajorRoads(route);
-        if (hasMajorRoads) {
-          console.log('❌ Major roads detected - regenerating...');
-          // Rotate waypoints for next attempt
-          waypoints = waypoints.map((p, i) => {
-            const angle = (i / waypoints.length) * Math.PI * 2 + (Math.random() - 0.5);
-            const offset = 0.0008;
-            return [p[0] + Math.cos(angle) * offset, p[1] + Math.sin(angle) * offset];
-          });
-          continue;
-        }
-        
-        console.log('✅ Route accepted - no major roads');
-        validRoute = route;
-      } catch (err) {
-        console.log('❌ Routing error:', err.message);
       }
+    } catch (err) {
+      console.log('❌ Routing failed:', err.message);
     }
 
     if (!validRoute) {
-      console.log('📍 All attempts failed, using safe fallback');
+      console.log('📍 Routing failed, using safe fallback');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty, selectedPattern);
     }
 
@@ -205,92 +174,6 @@ exports.handler = async (event) => {
 // Validate route against OSM major roads
 
 
-function validateRoute(route, targetDistance) {
-  // Just basic sanity check
-  const routeDistanceKm = route.distance / 1000;
-  const maxReasonable = Math.max(targetDistance * 2, 1);
-  
-  if (routeDistanceKm > maxReasonable) {
-    console.log(`⚠️ Route too long: ${routeDistanceKm.toFixed(1)}km`);
-    return false;
-  }
-  
-  console.log(`✅ Route distance OK: ${routeDistanceKm.toFixed(1)}km`);
-  return true;
-}
-
-async function checkForMajorRoads(route) {
-  // Check if route actually overlaps with major roads
-  try {
-    const coords = route.geometry.coordinates;
-    
-    // Get bounding box
-    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-    for (let coord of coords) {
-      minLng = Math.min(minLng, coord[0]);
-      maxLng = Math.max(maxLng, coord[0]);
-      minLat = Math.min(minLat, coord[1]);
-      maxLat = Math.max(maxLat, coord[1]);
-    }
-    
-    // Expand bbox
-    const padding = 0.005;
-    const bbox = `${minLat - padding},${minLng - padding},${maxLat + padding},${maxLng + padding}`;
-    
-    console.log('🛣️  Checking for motorways/A-roads...');
-    
-    const query = `[bbox:${bbox}];(way["highway"="motorway"];way["highway"="trunk"];way["highway"="primary"];);out geom;`;
-    
-    const resp = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: query
-    });
-    
-    if (!resp.ok) return false; // On error, assume it's OK
-    
-    const data = await resp.json();
-    const roads = data.elements || [];
-    
-    console.log(`Found ${roads.length} major roads in area`);
-    
-    if (roads.length === 0) {
-      console.log('✅ No major roads in area');
-      return false; // No major roads = good
-    }
-    
-    // Check if route coordinates are too close to any major road
-    const buffer = 0.0008; // ~80 meters
-    
-    for (let road of roads) {
-      if (!road.geometry) continue;
-      
-      for (let roadCoord of road.geometry) {
-        for (let routeCoord of coords) {
-          const lat1 = routeCoord[1];
-          const lng1 = routeCoord[0];
-          const lat2 = roadCoord.lat;
-          const lng2 = roadCoord.lon;
-          
-          const latDiff = lat1 - lat2;
-          const lngDiff = lng1 - lng2;
-          const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff);
-          
-          if (distance < buffer) {
-            console.log(`❌ Route TOO CLOSE to major road (${(distance * 111000).toFixed(0)}m)`);
-            return true; // Found major road = bad
-          }
-        }
-      }
-    }
-    
-    console.log('✅ Route keeps safe distance from major roads');
-    return false; // No close roads = good
-    
-  } catch (error) {
-    console.log('⚠️  Overpass check failed:', error.message);
-    return false; // On error, assume OK (conservative)
-  }
-}
 
 function fallbackRoute(centerLat, centerLng, distanceKm, difficulty, pattern) {
   console.log('📍 Generating safe fallback route');
