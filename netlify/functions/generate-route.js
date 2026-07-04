@@ -102,99 +102,34 @@ exports.handler = async (event) => {
     waypoints.push([centerLng, centerLat]); // Return to center
     console.log(`✅ Created ${selectedPattern} walk (${waypoints.length} waypoints)`);
 
-    waypoints.push(waypoints[0]);
-    console.log(`✅ Routing ${numWaypoints} waypoints with Valhalla (footpath-prioritized)...`);
 
-    const waypointLocations = waypoints.map(p => ({
-      lat: p[1],
-      lon: p[0]
-    }));
+    console.log(`✅ Waypoints created: ${waypoints.length}`);
 
-    const valhallRequest = {
-      locations: waypointLocations,
-      costing: 'pedestrian',
-      costing_options: {
-        pedestrian: {
-          use_roads: 0.1,
-          use_tracks: 0.8,
-          use_paths: 1.0,
-          mode: 'shorter'
-        }
-      },
-      filters: {
-        attributes: ['edge.id', 'edge.way_id'],
-        action: 'include'
-      },
-      shape_match: 'map_snap'
-    };
+    // STEP 4: Route with OSRM foot profile
+    console.log(`📍 Routing ${waypoints.length} waypoints with OSRM...`);
+
+    const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
+    const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
 
     let validRoute = null;
 
     try {
-      const routeResponse = await fetch('https://valhalla1.openstreetmap.de/route', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(valhallRequest),
-        timeout: 15000
-      });
+      const routeResponse = await fetch(routeUrl, { timeout: 10000 });
 
       if (routeResponse.ok) {
         const routeData = await routeResponse.json();
 
-        if (routeData.trip && routeData.trip.legs && routeData.trip.legs.length > 0) {
-          // Convert Valhalla response to OSRM-like format
-          const legs = routeData.trip.legs;
-          let totalDistance = 0;
-          let coordinates = [];
-
-          for (let leg of legs) {
-            if (leg.shape) {
-              const shape = leg.shape;
-              for (let i = 0; i < shape.length; i += 2) {
-                coordinates.push([shape[i + 1], shape[i]]); // [lng, lat]
-              }
-            }
-            totalDistance += leg.distance || 0;
-          }
-
-          validRoute = {
-            distance: totalDistance,
-            geometry: { coordinates },
-            routes: [{ distance: totalDistance, geometry: { coordinates } }]
-          };
-
-          console.log(`✅ Valhalla route: ${(totalDistance / 1000).toFixed(1)}km`);
+        if (routeData.code === 'Ok' && routeData.routes && routeData.routes.length > 0) {
+          validRoute = routeData.routes[0];
+          console.log(`✅ Route: ${(validRoute.distance / 1000).toFixed(1)}km`);
         }
       }
     } catch (err) {
-      console.log('⚠️  Valhalla error:', err.message);
-    }
-
-    // Fallback to OSRM if Valhalla fails
-    if (!validRoute) {
-      console.log('📍 Valhalla failed, falling back to OSRM foot profile...');
-
-      const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
-      const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
-
-      try {
-        const routeResponse = await fetch(routeUrl, { timeout: 10000 });
-
-        if (routeResponse.ok) {
-          const routeData = await routeResponse.json();
-
-          if (routeData.code === 'Ok' && routeData.routes && routeData.routes.length > 0) {
-            validRoute = routeData.routes[0];
-            console.log(`✅ OSRM route: ${(validRoute.distance / 1000).toFixed(1)}km`);
-          }
-        }
-      } catch (err) {
-        console.log('⚠️  OSRM fallback error:', err.message);
-      }
+      console.log('⚠️  Routing error:', err.message);
     }
 
     if (!validRoute) {
-      console.log('📍 Both routing engines failed, using safe fallback');
+      console.log('📍 Routing failed, using safe fallback');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty, selectedPattern);
     }
 
@@ -202,7 +137,7 @@ exports.handler = async (event) => {
     console.log('📍 Extracting final route...');
     const coordinates = validRoute.geometry.coordinates.map(c => [c[1], c[0]]);
     const actualDistance = (validRoute.distance / 1000).toFixed(1);
-    const elevationGain = difficulty === 'easy' ? 50 : difficulty === 'moderate' ? 150 : 250;
+    const elevationGain = Math.round(50 + (actualDistance / 2)); // Estimate based on distance
 
     console.log('✅ Final route:', { distance: actualDistance, coords: coordinates.length, pattern: selectedPattern });
 
@@ -261,7 +196,8 @@ function fallbackRoute(centerLat, centerLng, distanceKm, difficulty, pattern) {
     }
   }
 
-  const elevationGain = difficulty === 'easy' ? 50 : difficulty === 'moderate' ? 150 : 250;
+  
+  const elevationGain = Math.round(50 + (distanceKm / 2)); // Estimate based on distance
 
   return {
     statusCode: 200,
