@@ -427,19 +427,31 @@ function buildGraphComplete(ways, centerLat, centerLng) {
       }
     }
 
+    // Create edges BOTH DIRECTIONS (bidirectional for pedestrian routing)
     for (let i = 0; i < wayNodes.length - 1; i++) {
       const from = wayNodes[i];
       const to = wayNodes[i + 1];
       const dist = haversine(from.lat, from.lon, to.lat, to.lon);
       
-      edges.push({
+      // Forward edge
+      const fwdEdge = {
         from: from.id,
         to: to.id,
         dist,
         score: way.score || 0.5
-      });
-
+      };
+      edges.push(fwdEdge);
       from.edges.push(edges.length - 1);
+
+      // Reverse edge (pedestrians can walk both ways)
+      const revEdge = {
+        from: to.id,
+        to: from.id,
+        dist,
+        score: way.score || 0.5
+      };
+      edges.push(revEdge);
+      to.edges.push(edges.length - 1);
     }
   }
 
@@ -570,56 +582,28 @@ function buildReturnPath(edges, nodeById, current, start, targetDist, visitedOut
       .filter(e => e.toNode);
 
     if (available.length === 0) {
-      // Can't find new edges, try going backwards on visited paths
-      const backEdges = edges
-        .filter(e => e.to === node.id && !visited.has(e.from))
-        .map(e => ({ ...e, toNode: nodeById[e.from] }))
-        .filter(e => e.toNode);
-
-      if (backEdges.length === 0) {
-        break;
-      }
-
-      // Prefer edges that go toward start
-      const nextEdge = backEdges.reduce((a, b) => {
-        const aDist = haversine(a.toNode.lat, a.toNode.lon, start.lat, start.lon);
-        const bDist = haversine(b.toNode.lat, b.toNode.lon, start.lat, start.lon);
-        return bDist < aDist ? b : a;
-      });
-
-      if (!nextEdge) break;
-
-      const next = nodeById[nextEdge.to];
-      const edgeDist = nextEdge.dist;
-      
-      if (totalDist + edgeDist > targetDist * 1.3) {
-        break;
-      }
-
-      totalDist += edgeDist;
-      visited.add(next.id);
-      route.push(next);
-    } else {
-      // Prefer edges that go TOWARD center (return phase)
-      const nextEdge = available.reduce((a, b) => {
-        const aDist = a.toNode.distToCenter;
-        const bDist = b.toNode.distToCenter;
-        return bDist < aDist ? b : a;
-      });
-
-      if (!nextEdge) break;
-
-      const next = nodeById[nextEdge.to];
-      const edgeDist = nextEdge.dist;
-      
-      if (totalDist + edgeDist > targetDist * 1.3) {
-        break;
-      }
-
-      totalDist += edgeDist;
-      visited.add(next.id);
-      route.push(next);
+      break;
     }
+
+    // Prefer edges that go TOWARD center/start
+    const nextEdge = available.reduce((a, b) => {
+      const aDist = a.toNode.distToCenter;
+      const bDist = b.toNode.distToCenter;
+      return bDist < aDist ? b : a;
+    });
+
+    if (!nextEdge) break;
+
+    const next = nodeById[nextEdge.to];
+    const edgeDist = nextEdge.dist;
+    
+    if (totalDist + edgeDist > targetDist * 1.3) {
+      break;
+    }
+
+    totalDist += edgeDist;
+    visited.add(next.id);
+    route.push(next);
   }
 
   return route;
