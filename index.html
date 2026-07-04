@@ -374,7 +374,7 @@
         /* Toggle Switch */
         .toggle-group {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 12px;
         }
 
@@ -1025,20 +1025,14 @@
                 <!-- Time -->
                 <div class="control-group">
                     <label class="control-label">⏱️ Time Available</label>
-                    <div class="button-group" id="timeButtons">
-                        <button class="btn btn-option active" data-time="15">15m</button>
-                        <button class="btn btn-option" data-time="20">20m</button>
-                        <button class="btn btn-option" data-time="30">30m</button>
-                        <button class="btn btn-option" data-time="45">45m</button>
-                        <button class="btn btn-option" data-time="60">1h</button>
-                        <button class="btn btn-option" data-time="90">1.5h</button>
-                        <button class="btn btn-option" data-time="120">2h</button>
-                        <button class="btn btn-option" data-time="180">3h</button>
-                    </div>
-                    <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
-                        <input type="number" id="customTime" placeholder="Custom (min)" min="10" max="300" 
-                               style="flex: 1; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt); color: var(--color-text);">
-                        <button id="customTimeBtn" class="btn" style="flex: 0.5; padding: 11px 12px;">Set</button>
+                    <div class="button-group" id="timeButtons" style="grid-template-columns: repeat(7, 1fr); gap: 6px;">
+                        <button class="btn btn-option active" data-time="15" style="padding: 9px 8px; font-size: 11px;">15m</button>
+                        <button class="btn btn-option" data-time="20" style="padding: 9px 8px; font-size: 11px;">20m</button>
+                        <button class="btn btn-option" data-time="30" style="padding: 9px 8px; font-size: 11px;">30m</button>
+                        <button class="btn btn-option" data-time="45" style="padding: 9px 8px; font-size: 11px;">45m</button>
+                        <button class="btn btn-option" data-time="60" style="padding: 9px 8px; font-size: 11px;">1h</button>
+                        <button class="btn btn-option" data-time="90" style="padding: 9px 8px; font-size: 11px;">1.5h</button>
+                        <button class="btn btn-option" data-time="120" style="padding: 9px 8px; font-size: 11px;">2h</button>
                     </div>
                 </div>
 
@@ -1051,16 +1045,6 @@
                         <button class="btn btn-option" data-pace="5.0" data-pace-label="Fast">Fast</button>
                     </div>
                     <div style="font-size: 13px; color: var(--color-text-light); margin-top: 10px; padding: 10px 12px; background: var(--color-bg-alt); border-radius: 8px;" id="paceInfo">~4 km/h (moderate walk)</div>
-                </div>
-
-                <!-- Difficulty -->
-                <div class="control-group">
-                    <label class="control-label">⛰️ Preferred Difficulty</label>
-                    <div class="button-group" style="grid-template-columns: repeat(3, 1fr);">
-                        <button class="btn btn-option" data-difficulty="easy">Easy</button>
-                        <button class="btn btn-option active" data-difficulty="moderate">Moderate</button>
-                        <button class="btn btn-option" data-difficulty="hard">Hard</button>
-                    </div>
                 </div>
 
                 <!-- Preferences (Toggle Switches) -->
@@ -1303,7 +1287,6 @@
                 pushchair: false,
                 wheelchair: false
             },
-            difficulty: 'moderate',
             currentRoute: null,
             currentMap: null,
             savedRoutes: [],
@@ -1461,23 +1444,7 @@
                 state.time = parseInt(e.target.dataset.time);
                 document.querySelectorAll('[data-time]').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
-                document.getElementById('customTime').value = '';
             });
-        });
-
-        document.getElementById('customTimeBtn').addEventListener('click', () => {
-            const customValue = parseInt(document.getElementById('customTime').value);
-            if (customValue && customValue >= 10 && customValue <= 300) {
-                state.time = customValue;
-                document.querySelectorAll('[data-time]').forEach(b => b.classList.remove('active'));
-                showToast(`Custom time set: ${customValue} minutes`);
-            } else {
-                showError('Enter a time between 10 and 300 minutes');
-            }
-        });
-
-        document.getElementById('customTime').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') document.getElementById('customTimeBtn').click();
         });
 
         // ==================== PACE ====================
@@ -1501,15 +1468,6 @@
             if (el) el.textContent = descriptions[state.paceLabel] || '';
         }
 
-        // ==================== DIFFICULTY ====================
-        document.querySelectorAll('[data-difficulty]').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                state.difficulty = e.target.dataset.difficulty;
-                document.querySelectorAll('[data-difficulty]').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-            });
-        });
-
         // ==================== GENERATE ROUTE ====================
         const API_URL = '/.netlify/functions/generate-route';
 
@@ -1531,8 +1489,7 @@
                         location: state.location,
                         time: state.time,
                         pace: state.pace,
-                        preferences: state.preferences,
-                        difficulty: state.difficulty
+                        preferences: state.preferences
                     })
                 });
 
@@ -1544,7 +1501,6 @@
                     ...data,
                     timestamp: new Date().toISOString(),
                     distance: (data.distance || 0).toFixed(1),
-                    difficulty: state.difficulty,
                     calories: Math.round(state.time * (state.pace / 4) * 8),
                     rating: 0
                 };
@@ -1565,9 +1521,6 @@
             const km = state.currentRoute.distance || 3.2;
             const miles = (km * 0.621371).toFixed(1);
             document.getElementById('resultDistance').textContent = `${km} km (${miles} miles)`;
-
-            const elevationGain = state.difficulty === 'easy' ? '50-100 ft' : state.difficulty === 'moderate' ? '100-200 ft' : '200+ ft';
-            document.getElementById('resultDifficulty').textContent = `${state.difficulty.charAt(0).toUpperCase() + state.difficulty.slice(1)} • ${elevationGain} elevation`;
 
             // DRAW MAP
             setTimeout(() => {
@@ -1965,10 +1918,6 @@ ${points}
                 <div style="margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border);">
                     <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 6px;">Distance</div>
                     <div id="resultDistance" style="font-size: 15px; font-weight: 600;">-</div>
-                </div>
-                <div style="margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border);">
-                    <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 6px;">Elevation Gain</div>
-                    <div id="resultDifficulty" style="font-size: 15px; font-weight: 600;">-</div>
                 </div>
                 <div style="margin-bottom: 14px;">
                     <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 6px;">Rate This Route</div>
