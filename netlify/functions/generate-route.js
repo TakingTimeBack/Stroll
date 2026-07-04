@@ -9,132 +9,173 @@ exports.handler = async (event) => {
   try {
     LOG.push('START');
     
-    const body = JSON.parse(event.body);
+    // Parse input safely
+    let body;
+    try {
+      body = JSON.parse(event.body);
+    } catch (err) {
+      LOG.push(`PARSE_ERROR: ${err.message}`);
+      return jsonResponse(400, { error: 'Invalid JSON input', debug: LOG });
+    }
+
     const { location, time, pace, preferences } = body;
     LOG.push(`INPUT: location=${location}, time=${time}, pace=${pace}`);
 
-    if (!location || !time || !pace) {
-      LOG.push('FAIL: Missing input');
-      return errorResponse(400, 'Missing location, time, or pace', LOG);
+    if (!location || time === undefined || !pace) {
+      LOG.push('FAIL: Missing required fields');
+      return jsonResponse(400, { error: 'Missing location, time, or pace', debug: LOG });
     }
 
     // ===== GEOCODE =====
-    LOG.push('GEOCODING...');
+    LOG.push('STEP: Geocoding');
     const coords = await geocodeLocation(location);
     if (!coords) {
-      LOG.push('FAIL: Geocoding failed');
-      return errorResponse(400, `Could not find location: ${location}`, LOG);
+      LOG.push('FAIL: Geocoding returned null');
+      return jsonResponse(400, { error: `Location not found: "${location}"`, debug: LOG });
     }
     
     const [lat, lng] = coords;
-    LOG.push(`GEOCODED: lat=${lat.toFixed(4)}, lng=${lng.toFixed(4)}`);
+    LOG.push(`OK: lat=${lat.toFixed(4)}, lng=${lng.toFixed(4)}`);
 
     // ===== DISTANCE =====
     const targetKm = (time / 60) * pace;
-    LOG.push(`TARGET_DISTANCE: ${targetKm.toFixed(2)}km`);
+    if (isNaN(targetKm) || targetKm <= 0) {
+      LOG.push('FAIL: Invalid distance calculation');
+      return jsonResponse(400, { error: `Invalid distance: ${targetKm}`, debug: LOG });
+    }
+    LOG.push(`OK: target=${targetKm.toFixed(2)}km`);
 
     // ===== FETCH WAYS =====
-    LOG.push('FETCHING_WAYS...');
+    LOG.push('STEP: Fetching ways');
     const radius = Math.max(800, Math.min(5000, targetKm * 2500));
-    LOG.push(`SEARCH_RADIUS: ${radius}m`);
+    LOG.push(`  radius=${radius}m`);
     
     const ways = await fetchAllWays(lat, lng, radius);
-    LOG.push(`WAYS_FETCHED: ${ways.length}`);
+    LOG.push(`OK: fetched=${ways.length} ways`);
 
     if (!ways || ways.length === 0) {
-      LOG.push('FAIL: No ways');
-      return errorResponse(400, 'No map data available', LOG);
+      LOG.push('FAIL: No ways from Overpass');
+      return jsonResponse(400, { error: 'No map data available for this location', debug: LOG });
     }
 
-    // ===== VALIDATE WAYS =====
-    const validWays = ways.filter(w => w && w.nodes && w.nodes.length > 1);
-    LOG.push(`VALID_WAYS: ${validWays.length}/${ways.length}`);
-
-    if (validWays.length === 0) {
-      LOG.push('FAIL: No valid ways after filtering');
-      return errorResponse(400, 'No valid pedestrian infrastructure', LOG);
+    // ===== VALIDATE & SCORE WAYS =====
+    LOG.push('STEP: Validating ways');
+    const validWays = [];
+    for (const w of ways) {
+      if (!w || !w.nodes || w.nodes.length < 2) continue;
+      validWays.push(w);
     }
+    LOG.push(`OK: valid=${validWays.length}/${ways.length}`);
 
-    // ===== FILTER WALKABLE =====
-    LOG.push('FILTERING_WALKABLE...');
-    const walkable = validWays.filter(w => {
+    LOG.push('STEP: Filtering walkable');
+    const walkable = [];
+    for (const w of validWays) {
       try {
-        return scoreWay(w) >= 0.2;
+        const score = scoreWay(w);
+        if (score >= 0.2) {
+          w.score = score;
+          walkable.push(w);
+        }
       } catch (err) {
-        LOG.push(`WARN: Scoring error on way ${w.id}: ${err.message}`);
-        return false;
+        LOG.push(`WARN: scoring error on ${w.id}: ${err.message}`);
       }
-    });
-
-    LOG.push(`WALKABLE_WAYS: ${walkable.length}/${validWays.length}`);
+    }
+    LOG.push(`OK: walkable=${walkable.length}/${validWays.length}`);
 
     if (walkable.length < 3) {
-      LOG.push(`FAIL: Only ${walkable.length} walkable ways`);
-      return errorResponse(400, `Only ${walkable.length} walkable ways found`, LOG);
+      LOG.push(`FAIL: insufficient walkable ways (${walkable.length} < 3)`);
+      return jsonResponse(400, { error: `Only ${walkable.length} walkable ways found - need at least 3`, debug: LOG });
     }
 
     // ===== BUILD GRAPH =====
-    LOG.push('BUILDING_GRAPH...');
+    LOG.push('STEP: Building graph');
     let graph;
     try {
       graph = buildGraph(walkable, lat, lng);
     } catch (err) {
-      LOG.push(`FAIL: Graph build error: ${err.message}`);
-      return errorResponse(500, `Graph error: ${err.message}`, LOG);
+      LOG.push(`FAIL: graph error: ${err.message}`);
+      return jsonResponse(500, { error: `Graph building failed: ${err.message}`, debug: LOG });
     }
 
-    LOG.push(`GRAPH: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+    LOG.push(`OK: nodes=${graph.nodes.length}, edges=${graph.edges.length}`);
 
-    if (graph.nodes.length < 3 || graph.edges.length < 2) {
-      LOG.push(`FAIL: Graph too sparse`);
-      return errorResponse(400, `Network too sparse: ${graph.nodes.length} nodes`, LOG);
+    if (!graph.nodes || graph.nodes.length < 3) {
+      LOG.push(`FAIL: graph has only ${graph.nodes?.length || 0} nodes`);
+      return jsonResponse(400, { error: `Network too small: ${graph.nodes?.length || 0} nodes`, debug: LOG });
+    }
+
+    if (!graph.edges || graph.edges.length < 2) {
+      LOG.push(`FAIL: graph has only ${graph.edges?.length || 0} edges`);
+      return jsonResponse(400, { error: `Network not connected: ${graph.edges?.length || 0} edges`, debug: LOG });
     }
 
     // ===== GENERATE ROUTE =====
-    LOG.push('GENERATING_ROUTE...');
+    LOG.push('STEP: Generating route');
     let route;
     try {
       route = generateRoute(graph, lat, lng, targetKm);
     } catch (err) {
-      LOG.push(`FAIL: Route generation error: ${err.message}`);
-      return errorResponse(500, `Route error: ${err.message}`, LOG);
+      LOG.push(`FAIL: route error: ${err.message}`);
+      return jsonResponse(500, { error: `Route generation failed: ${err.message}`, debug: LOG });
     }
 
-    if (!route || !route.coords || route.coords.length < 3) {
-      LOG.push('FAIL: Route too short');
-      return errorResponse(400, `Generated route has ${route?.coords?.length || 0} points`, LOG);
+    if (!route) {
+      LOG.push('FAIL: route is null');
+      return jsonResponse(500, { error: 'Route generation returned null', debug: LOG });
+    }
+
+    if (!route.coords || !Array.isArray(route.coords) || route.coords.length < 3) {
+      LOG.push(`FAIL: invalid coords: ${route.coords?.length || 0}`);
+      return jsonResponse(400, { error: `Route has ${route.coords?.length || 0} points (need 3+)`, debug: LOG });
     }
 
     LOG.push(`SUCCESS: ${route.coords.length} points, ${route.dist.toFixed(2)}km`);
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({
-        coordinates: route.coords,
-        distance: parseFloat(route.dist.toFixed(2)),
-        elevation: Math.round(50 + route.dist / 2),
-        duration: time,
-        location,
-        pattern: 'intelligent-pedestrian',
-        success: true,
-        debug: LOG
-      })
-    };
+    // Return success
+    return jsonResponse(200, {
+      coordinates: route.coords,
+      distance: parseFloat(route.dist.toFixed(2)),
+      elevation: Math.round(50 + route.dist / 2),
+      duration: time,
+      location,
+      pattern: 'intelligent-pedestrian',
+      success: true,
+      debug: LOG
+    });
 
   } catch (err) {
-    const msg = `${err.message} (${err.stack?.split('\n')[1] || 'unknown'})`;
+    const msg = err.message || 'Unknown error';
+    const stack = err.stack ? err.stack.split('\n')[1] : 'no stack';
     LOG.push(`CRITICAL: ${msg}`);
+    LOG.push(`STACK: ${stack}`);
+
+    return jsonResponse(500, {
+      error: msg,
+      debug: LOG
+    });
+  }
+};
+
+// ===== RESPONSE HELPER =====
+function jsonResponse(status, data) {
+  try {
+    return {
+      statusCode: status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify(data)
+    };
+  } catch (err) {
+    // Fallback if stringify fails
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({
-        error: msg,
-        debug: LOG
-      })
+      body: JSON.stringify({ error: 'Response serialization failed' })
     };
   }
-};
+}
 
 // ============================================================
 // GEOCODE
@@ -468,15 +509,4 @@ function haversine(lat1, lon1, lat2, lon2) {
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.asin(Math.sqrt(a));
-}
-
-function errorResponse(code, message, logs) {
-  return {
-    statusCode: code,
-    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    body: JSON.stringify({
-      error: message,
-      debug: logs
-    })
-  };
 }

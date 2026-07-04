@@ -1493,9 +1493,19 @@
                     })
                 });
 
-                if (!response.ok) throw new Error('Route generation failed');
-
                 const data = await response.json();
+
+                // Log debug info if available
+                if (data.debug) {
+                    console.log('🔧 ROUTE DEBUG:', data.debug);
+                }
+
+                if (!response.ok) {
+                    const msg = data.error || 'Route generation failed';
+                    console.error('❌ Route error:', msg);
+                    throw new Error(msg);
+                }
+
                 state.currentRoute = {
                     id: Date.now(),
                     ...data,
@@ -1507,7 +1517,8 @@
 
                 displayRoute();
             } catch (error) {
-                showError('Unable to generate route. Please try again.');
+                console.error('Route generation error:', error.message);
+                showError(error.message || 'Unable to generate route. Please try again.');
             } finally {
                 btn.textContent = 'Generate My Stroll';
                 btn.disabled = false;
@@ -1741,9 +1752,19 @@
                     })
                 });
 
-                if (!response.ok) throw new Error('Route generation failed');
-
                 const data = await response.json();
+
+                // Log debug info if available
+                if (data.debug) {
+                    console.log('🔧 ROUTE DEBUG:', data.debug);
+                }
+
+                if (!response.ok) {
+                    const msg = data.error || 'Route generation failed';
+                    console.error('❌ Route error:', msg);
+                    throw new Error(msg);
+                }
+
                 state.currentRoute = {
                     id: Date.now(),
                     ...data,
@@ -1755,7 +1776,8 @@
 
                 displayRoute();
             } catch (error) {
-                showError('Unable to generate route. Please try again.');
+                console.error('Route generation error:', error.message);
+                showError(error.message || 'Unable to generate route. Please try again.');
             } finally {
                 btn.textContent = 'Generate Another';
                 btn.disabled = false;
