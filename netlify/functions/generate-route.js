@@ -43,28 +43,27 @@ exports.handler = async (event) => {
     const selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
     console.log('✅ Route pattern:', selectedPattern);
 
-    // SMART RADIUS: Scale with distance so waypoints aren't too spread out
-    // Short walks (20m): tiny area (~200m) | Long walks (2h): large area (~1.2km)
+    // CONSERVATIVE RADIUS: Smaller is better for short walks
     let baseRadius;
     
     if (distanceKm < 1.5) {
-      baseRadius = 0.0012; // ~120m for very short walks (15-20 min)
+      baseRadius = 0.0008; // ~80m for very short walks (15-20 min)
     } else if (distanceKm < 2.5) {
-      baseRadius = 0.0018; // ~180m for short walks (20-30 min)
+      baseRadius = 0.0012; // ~120m for short walks (20-30 min)
     } else if (distanceKm < 3.5) {
-      baseRadius = 0.003; // ~300m for medium walks
+      baseRadius = 0.0018; // ~180m for medium walks
     } else if (distanceKm < 5) {
-      baseRadius = 0.0045; // ~450m
+      baseRadius = 0.0025; // ~250m
     } else if (distanceKm < 7) {
-      baseRadius = 0.006; // ~600m
+      baseRadius = 0.004; // ~400m
     } else if (distanceKm < 10) {
-      baseRadius = 0.008; // ~800m
+      baseRadius = 0.005; // ~500m
     } else {
-      baseRadius = 0.010; // ~1000m for long walks
+      baseRadius = 0.007; // ~700m for long walks
     }
 
-    // Adjust waypoint count based on distance
-    const numWaypoints = Math.max(10, Math.min(20, Math.ceil(distanceKm * 3)));
+    // Adjust waypoint count - more waypoints for longer walks
+    const numWaypoints = Math.max(8, Math.min(16, Math.ceil(distanceKm * 2.5)));
     let waypoints = [];
 
     console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints, radius ${(baseRadius * 111).toFixed(0)}m (distance: ${distanceKm.toFixed(1)}km)...`);
@@ -72,7 +71,7 @@ exports.handler = async (event) => {
     if (selectedPattern === 'circle') {
       for (let i = 0; i < numWaypoints; i++) {
         const angle = (i / numWaypoints) * Math.PI * 2;
-        const variation = 1 + (Math.random() - 0.5) * 0.4; // Stronger randomization
+        const variation = 1 + (Math.random() - 0.5) * 0.15; // Reduced to 15% variation
         const lat = centerLat + baseRadius * Math.sin(angle) * variation;
         const lng = centerLng + baseRadius * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
@@ -99,7 +98,7 @@ exports.handler = async (event) => {
             lng = centerLng - baseRadius;
           }
           
-          const variation = 1 + (Math.random() - 0.5) * 0.3; // Stronger randomization
+          const variation = 1 + (Math.random() - 0.5) * 0.1; // Reduced to 10% variation
           waypoints.push([lng * variation, lat * variation]);
         }
         if (waypoints.length >= numWaypoints) break;
@@ -109,7 +108,7 @@ exports.handler = async (event) => {
         const t = i / numWaypoints;
         const angle = t * Math.PI * 4;
         const r = baseRadius * t;
-        const variation = 1 + (Math.random() - 0.5) * 0.3; // Stronger randomization
+        const variation = 1 + (Math.random() - 0.5) * 0.1; // Reduced to 10% variation
         const lat = centerLat + r * Math.sin(angle) * variation;
         const lng = centerLng + r * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
@@ -120,7 +119,7 @@ exports.handler = async (event) => {
         const r = baseRadius / 1.5;
         const lobeRadius = Math.sin(t) * r;
         const angle = t;
-        const variation = 1 + (Math.random() - 0.5) * 0.3; // Stronger randomization
+        const variation = 1 + (Math.random() - 0.5) * 0.1; // Reduced to 10% variation
         const lat = centerLat + lobeRadius * Math.sin(angle) * variation;
         const lng = centerLng + lobeRadius * Math.cos(angle) * variation;
         waypoints.push([lng, lat]);
