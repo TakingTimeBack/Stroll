@@ -45,25 +45,35 @@ exports.handler = async (event) => {
 
     console.log(`✅ Fetched ${allWays.length} ways`);
 
-    // STEP 4: Score each way for pedestrian-friendliness
+    // STEP 5: Filter to only walkable ways - more lenient threshold
     console.log('📊 Analyzing pedestrian infrastructure...');
     const scoredWays = allWays.map(way => ({
       ...way,
       pedestrianScore: scorePedestrianWay(way)
     }));
 
-    // STEP 5: Filter to only good pedestrian ways
-    const pedestrianWays = scoredWays.filter(w => w.pedestrianScore >= 0.4);
-    console.log(`✅ ${pedestrianWays.length} ways suitable for walking (score >= 0.4)`);
+    // Log score distribution
+    const scores = scoredWays.map(w => w.pedestrianScore);
+    const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+    console.log(`📊 Score distribution: avg=${avgScore.toFixed(2)}, min=${Math.min(...scores).toFixed(2)}, max=${Math.max(...scores).toFixed(2)}`);
 
-    if (pedestrianWays.length < 5) {
-      console.log('⚠️  Too few good pedestrian ways, lowering threshold');
-      return fallbackRoute(centerLat, centerLng, targetDistanceKm);
+    // Filter with lower threshold - 0.2 instead of 0.4
+    const pedestrianWays = scoredWays.filter(w => w.pedestrianScore >= 0.2);
+    console.log(`✅ ${pedestrianWays.length} ways suitable for walking (score >= 0.2)`);
+
+    if (pedestrianWays.length < 3) {
+      console.log('❌ CRITICAL: Fewer than 3 walkable ways found, cannot generate route');
+      return error(400, 'Not enough pedestrian infrastructure in this area');
     }
 
     // STEP 6: Build graph from scored ways
     const graph = buildIntelligentGraph(pedestrianWays, centerLat, centerLng);
     console.log(`✅ Graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+
+    if (graph.nodes.length < 3 || graph.edges.length < 2) {
+      console.log('❌ Graph too small to route');
+      return error(400, 'Insufficient connected paths in this area');
+    }
 
     // STEP 7: Generate route using quality-aware routing
     const route = generateSmartCircularRoute(
@@ -75,8 +85,8 @@ exports.handler = async (event) => {
     );
 
     if (!route || route.coordinates.length < 3) {
-      console.log('⚠️  Route too short, fallback');
-      return fallbackRoute(centerLat, centerLng, targetDistanceKm);
+      console.log('❌ Route generation failed completely');
+      return error(400, 'Unable to generate a walking route for this location');
     }
 
     console.log(`✅ Route: ${route.distance.toFixed(1)}km, ${route.coordinates.length} points`);
@@ -114,173 +124,79 @@ exports.handler = async (event) => {
 /**
  * Score a way for pedestrian friendliness (0.0 to 1.0)
  * 
- * Considers:
- * - Explicit pedestrian infrastructure (footways, sidewalks)
- * - Traffic speed (lower = safer)
- * - Road type
- * - Surface quality
- * - Access restrictions
- * - Infrastructure tags (crossings, lighting, etc.)
+ * PHILOSOPHY: Most ways are walkable unless explicitly forbidden.
+ * Scoring reflects quality of walk, not whether it's possible.
+ * 
+ * - 1.0: Perfect (dedicated footpath, park)
+ * - 0.7-0.9: Good (residential, pedestrian zone)
+ * - 0.4-0.7: Fair (regular road with some pedestrian features)
+ * - 0.2-0.4: Acceptable (any road without explicit foot=no)
+ * - 0.0: Forbidden (private, foot=no)
  */
 function scorePedestrianWay(way) {
   const tags = way.tags || {};
-  let score = 0;
-  const factors = [];
-
-  // ===== EXPLICIT PEDESTRIAN INFRASTRUCTURE (highest priority) =====
   
-  // Dedicated footways/pedestrian zones
+  // ===== AUTOMATIC EXCLUSIONS =====
+  if (tags.access === 'private' || tags.access === 'no') return 0;
+  if (tags.foot === 'no' || tags.foot === 'discouraged') return 0;
+  if (tags.motor_vehicle === 'only') return 0;
+  
+  // Start with baseline - most ways are walkable
+  let score = 0.3;
+  
+  // ===== EXPLICIT PEDESTRIAN INFRASTRUCTURE =====
   if (tags.highway === 'footway') {
-    score += 1.0;
-    factors.push('footway');
+    score = 1.0;
   } else if (tags.highway === 'pedestrian') {
-    score += 0.95;
-    factors.push('pedestrian_zone');
-  } else if (tags.highway === 'path' && tags.foot !== 'no') {
-    score += 0.9;
-    factors.push('path');
+    score = 0.95;
+  } else if (tags.highway === 'path') {
+    score = 0.85;
+  } else if (tags.leisure === 'park' || tags.leisure === 'garden') {
+    score = 0.9;
+  } else if (tags.highway === 'track') {
+    score = 0.7;
   }
-
-  // Explicit sidewalk presence
-  if (tags.sidewalk === 'both' || tags.sidewalk === 'yes') {
-    score += 0.3;
-    factors.push('sidewalk_both');
-  } else if (tags.sidewalk === 'left' || tags.sidewalk === 'right') {
-    score += 0.15;
-    factors.push('sidewalk_one');
-  }
-
-  // Explicit pedestrian permission
-  if (tags.foot === 'designated') {
-    score += 0.25;
-    factors.push('foot_designated');
-  } else if (tags.foot === 'permissive') {
-    score += 0.15;
-    factors.push('foot_permissive');
-  }
-
-  // Parks and gardens
-  if (tags.leisure === 'park' || tags.leisure === 'garden') {
-    score += 0.85;
-    factors.push('park_garden');
-  }
-
-  // Bus routes (usually well-maintained, good infrastructure)
-  if (tags.bus_route === 'yes' || tags.route === 'bus') {
-    score += 0.2;
-    factors.push('bus_route');
-  }
-
-  // ===== TRAFFIC SPEED (critical for safety) =====
+  // If no special type, start from 0.3 baseline (any regular road)
   
+  // ===== BOOST FOR PEDESTRIAN FEATURES =====
+  if (tags.sidewalk === 'both') score = Math.min(1, score + 0.25);
+  else if (tags.sidewalk === 'yes' || tags.sidewalk === 'left' || tags.sidewalk === 'right') score = Math.min(1, score + 0.15);
+  
+  if (tags.foot === 'designated') score = Math.min(1, score + 0.2);
+  if (tags.foot === 'permissive') score = Math.min(1, score + 0.1);
+  
+  if (tags.lit === 'yes') score = Math.min(1, score + 0.1);
+  
+  // ===== PENALIZE HIGH-SPEED ROADS (but don't exclude) =====
   const speedLimit = parseInt(tags.maxspeed);
   if (!isNaN(speedLimit)) {
-    if (speedLimit <= 20) {
-      score += 0.3;
-      factors.push(`speed_${speedLimit}mph`);
-    } else if (speedLimit <= 30) {
-      score += 0.2;
-      factors.push(`speed_${speedLimit}mph`);
-    } else if (speedLimit <= 40) {
-      score += 0.05;
-      factors.push(`speed_${speedLimit}mph`);
-    } else {
-      score -= 0.1; // High speed = danger
-      factors.push(`speed_${speedLimit}mph_risky`);
-    }
+    if (speedLimit >= 70) score *= 0.5; // Motorway speed = risky
+    else if (speedLimit >= 50) score *= 0.7; // High speed
+    else if (speedLimit >= 40) score *= 0.85; // Medium-high
+    // <= 30: no penalty
+  } else if (tags.highway === 'motorway' || tags.highway === 'motorway_link') {
+    score *= 0.3; // Motorway without explicit speed = dangerous
+  } else if (tags.highway === 'trunk' || tags.highway === 'trunk_link') {
+    score *= 0.5; // Trunk roads risky
+  } else if (tags.highway === 'primary' || tags.highway === 'primary_link') {
+    score *= 0.7; // Primary roads less safe
+  } else if (tags.highway === 'secondary' || tags.highway === 'secondary_link') {
+    score *= 0.85; // Secondary OK if reasonable
+  } else if (['residential', 'living_street', 'tertiary', 'unclassified'].includes(tags.highway)) {
+    score *= 1.0; // No penalty for quiet roads
   }
-
-  // ===== ROAD CLASS SCORING (not exclusionary, just weighted) =====
   
-  const roadType = tags.highway;
-  
-  if (['residential', 'living_street', 'unclassified'].includes(roadType)) {
-    score += 0.4;
-    factors.push('quiet_street');
-  } else if (['tertiary', 'secondary'].includes(roadType)) {
-    // These can be pedestrian-friendly if they have good infrastructure
-    score += 0.15;
-    factors.push('medium_road');
-  } else if (['primary', 'trunk', 'motorway', 'motorway_link'].includes(roadType)) {
-    // High-speed roads: only viable if excellent pedestrian infrastructure
-    score -= 0.2;
-    factors.push('high_speed_road');
-  }
-
-  // Special case: A-roads and B-roads might be pedestrian-friendly in UK
-  if (tags.ref && (tags.ref.startsWith('A') || tags.ref.startsWith('B'))) {
-    // A/B roads: check for pedestrian mitigation
-    if (tags.sidewalk || tags.foot === 'designated' || tags['lane:footway']) {
-      score += 0.25; // Good pedestrian infrastructure makes it viable
-      factors.push('aroad_with_infrastructure');
-    } else if (tags.maxspeed && parseInt(tags.maxspeed) <= 30) {
-      score += 0.1;
-      factors.push('aroad_low_speed');
-    } else {
-      score -= 0.15; // A-road without pedestrian features = risky
-      factors.push('aroad_risky');
-    }
-  }
-
   // ===== SURFACE QUALITY =====
-  
   const surface = tags.surface;
-  if (['asphalt', 'concrete', 'paved_smooth'].includes(surface)) {
-    score += 0.15;
-    factors.push('good_surface');
-  } else if (['gravel', 'dirt', 'unpaved'].includes(surface)) {
-    score -= 0.1;
-    factors.push('poor_surface');
-  } else if (surface === 'cobblestone' || surface === 'sett') {
-    score += 0.05;
-    factors.push('cobblestone');
+  if (surface === 'asphalt' || surface === 'concrete' || surface === 'paved_smooth') {
+    score = Math.min(1, score + 0.1);
+  } else if (surface === 'gravel' || surface === 'dirt' || surface === 'unpaved') {
+    score *= 0.9; // Slightly worse, but still walkable
   }
-
-  // ===== INFRASTRUCTURE & SAFETY =====
   
-  if (tags.lit === 'yes') {
-    score += 0.1;
-    factors.push('lit');
-  }
-
-  if (tags.crossing === 'traffic_signals' || tags.crossing === 'yes') {
-    score += 0.1;
-    factors.push('crossing');
-  }
-
-  if (tags.barrier === 'bollard' || tags.barrier === 'gate') {
-    // Protected from vehicles = safer
-    score += 0.15;
-    factors.push('vehicle_protected');
-  }
-
-  // Width preference (wider = better for walking)
-  const width = parseFloat(tags.width);
-  if (!isNaN(width)) {
-    if (width >= 3) {
-      score += 0.1;
-      factors.push(`wide_${width}m`);
-    } else if (width < 1.5) {
-      score -= 0.05;
-      factors.push('narrow');
-    }
-  }
-
-  // ===== ACCESS RESTRICTIONS =====
+  // Ensure score is in valid range
+  score = Math.max(0.01, Math.min(1, score));
   
-  if (tags.access === 'private' || tags.access === 'no') {
-    score = 0; // Completely blocked
-    factors.push('private_restricted');
-  } else if (tags.foot === 'no' || tags.foot === 'discouraged') {
-    score = 0; // No foot access
-    factors.push('foot_prohibited');
-  }
-
-  // Normalize score to 0-1 range and cap
-  score = Math.max(0, Math.min(1, score));
-
-  console.log(`  Way ${way.id}: score=${score.toFixed(2)} [${tags.highway}] (${factors.join(', ')})`);
-
   return score;
 }
 
@@ -584,30 +500,6 @@ function simplifyRoute(route) {
   }
 
   return simplified;
-}
-
-function fallbackRoute(lat, lng, distanceKm) {
-  const radiusDegrees = (distanceKm / 2) / 111;
-  const numPoints = 24;
-  const coordinates = [];
-
-  for (let i = 0; i < numPoints; i++) {
-    const angle = (i / numPoints) * Math.PI * 2;
-    coordinates.push([
-      lat + radiusDegrees * Math.sin(angle),
-      lng + radiusDegrees * Math.cos(angle)
-    ]);
-  }
-  coordinates.push(coordinates[0]);
-
-  return success({
-    coordinates,
-    distance: distanceKm,
-    elevation: Math.round(50 + (distanceKm / 2)),
-    fallback: true,
-    pattern: 'fallback-circle',
-    success: true
-  });
 }
 
 function success(data) {
