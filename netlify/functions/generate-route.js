@@ -53,12 +53,12 @@ exports.handler = async (event) => {
       preferences
     );
 
-    if (!route || route.coordinates.length < 2) {
-      console.log('⚠️  Route generation failed, using fallback');
+    if (!route || route.coordinates.length < 3) {
+      console.log('⚠️  Route too short or failed, using fallback');
       return fallbackRoute(centerLat, centerLng, targetDistanceKm);
     }
 
-    console.log(`✅ Route: ${route.distance.toFixed(1)}km, ${route.coordinates.length} points`);
+    console.log(`✅ Route: ${route.distance.toFixed(1)}km, ${route.coordinates.length} points, simplified from ${route.simplified || route.nodes}`);
 
     return success({
       coordinates: route.coordinates,
@@ -72,7 +72,8 @@ exports.handler = async (event) => {
         engine: 'stroll-custom',
         source: 'openstreetmap',
         ways: ways.length,
-        nodes: graph.nodes.length
+        nodes: graph.nodes.length,
+        edges: graph.edges.length
       }
     });
 
@@ -110,54 +111,88 @@ async function geocodeLocation(location) {
 async function fetchPedestrianWays(lat, lng, radiusMeters) {
   const radiusDegrees = radiusMeters / 111000; // 1 degree ≈ 111km
 
-  // Overpass QL query - STRICT pedestrian ways only
-  const query = `
+  // Query 1: Strict pedestrian-only ways (highest priority)
+  const strictQuery = `
     [bbox:${lat - radiusDegrees},${lng - radiusDegrees},${lat + radiusDegrees},${lng + radiusDegrees}];
     (
       way["highway"="footway"];
       way["highway"="path"];
       way["highway"="pedestrian"];
+      way["highway"="track"];
       way["leisure"="park"];
       way["leisure"="garden"];
-      way["leisure"="pitch"];
-      way["access"="public"];
     );
     out geom;
   `;
 
+  // Query 2: Lower-speed roads if strict query returns few ways
+  const broadQuery = `
+    [bbox:${lat - radiusDegrees},${lng - radiusDegrees},${lat + radiusDegrees},${lng + radiusDegrees}];
+    (
+      way["highway"="footway"];
+      way["highway"="path"];
+      way["highway"="pedestrian"];
+      way["highway"="residential"];
+      way["highway"="unclassified"];
+      way["highway"="living_street"];
+      way["highway"="tertiary"];
+      way["leisure"="park"];
+      way["leisure"="garden"];
+    );
+    out geom;
+  `;
+
+  // Explicitly exclude these
+  const isExcluded = (way) => {
+    const highway = way.tags?.highway;
+    const excluded = ['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link'];
+    return excluded.includes(highway);
+  };
+
   try {
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
+    // Try strict query first
+    const strictResponse = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
-      body: query,
+      body: strictQuery,
       timeout: 20000
     });
 
-    if (!response.ok) {
-      console.warn('Overpass API failed, status:', response.status);
+    let data = strictResponse.ok ? await strictResponse.json() : null;
+    
+    // If strict query returns few ways, use broader query
+    if (!data || !data.ways || data.ways.length < 5) {
+      console.log('⚠️  Strict query returned < 5 ways, trying broader query...');
+      const broadResponse = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: broadQuery,
+        timeout: 20000
+      });
+      data = broadResponse.ok ? await broadResponse.json() : null;
+    }
+
+    if (!data || !data.ways) {
+      console.warn('No ways found');
       return [];
     }
 
-    const data = await response.json();
-    
-    // Convert Overpass ways to simple format with filtering
+    console.log(`✅ Overpass returned ${data.ways.length} ways`);
+
+    // Convert and filter
     return (data.ways || [])
+      .filter(way => !isExcluded(way)) // Exclude major roads
       .map(way => ({
         id: way.id,
         nodes: way.geometry.map(g => ({ lat: g.lat, lon: g.lon })),
         type: way.tags?.highway || way.tags?.leisure || 'path',
         name: way.tags?.name || null,
-        access: way.tags?.access
+        access: way.tags?.access,
+        surface: way.tags?.surface
       }))
       .filter(way => 
         way.nodes.length > 1 &&
         way.access !== 'private' &&
         way.access !== 'no'
-      )
-      .sort((a, b) => {
-        // Prioritize footpaths
-        const typeOrder = { footway: 5, path: 4, pedestrian: 4, park: 3, garden: 3, pitch: 2 };
-        return (typeOrder[b.type] || 0) - (typeOrder[a.type] || 0);
-      });
+      );
 
   } catch (err) {
     console.warn('Overpass fetch error:', err.message);
