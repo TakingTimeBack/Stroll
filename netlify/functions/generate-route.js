@@ -1,6 +1,6 @@
 exports.handler = async (event) => {
   const LOG = [];
-  LOG.push("=== STROLL OSRM ROUTER ===");
+  LOG.push("=== STROLL OSRM ADAPTIVE ROUTER ===");
   
   try {
     const body = JSON.parse(event.body);
@@ -23,72 +23,109 @@ exports.handler = async (event) => {
     const targetKm = (time / 60) * pace;
     LOG.push(`TARGET: ${targetKm.toFixed(2)}km`);
 
-    // Waypoints
-    LOG.push("STEP: Generate waypoints");
-    const radius = Math.min(0.4, targetKm / 8);
-    const waypoints = [];
-    for (let i = 0; i < 4; i++) {
-      const angle = (i * 90 + Math.random() * 30) * Math.PI / 180;
-      const r = radius * (0.8 + Math.random() * 0.4) / 111;
-      waypoints.push({
-        lat: lat + r * Math.sin(angle),
-        lng: lng + r * Math.cos(angle)
-      });
-    }
-    LOG.push(`WAYPOINTS: ${waypoints.length}`);
-
-    // Route
-    LOG.push("STEP: Route via OSRM");
+    // Adaptive routing with feedback
+    let radius = Math.min(0.5, targetKm / 6);
+    let actualDist = 0;
     let allCoords = [];
-    let lastPt = { lat, lng };
+    let attempts = 0;
+    const maxAttempts = 3;
 
-    for (let i = 0; i < waypoints.length; i++) {
-      const segment = await routeOSRM(lastPt, waypoints[i]);
-      if (segment && segment.length > 0) {
-        if (allCoords.length === 0) {
-          allCoords.push(...segment);
-        } else {
-          allCoords.push(...segment.slice(1));
+    while (attempts < maxAttempts) {
+      attempts++;
+      LOG.push(`ATTEMPT ${attempts}: radius=${radius.toFixed(3)}`);
+
+      allCoords = [];
+      actualDist = 0;
+
+      // Generate waypoints at this radius
+      const waypoints = [];
+      for (let i = 0; i < 4; i++) {
+        const angle = (i * 90 + (Math.random() - 0.5) * 20) * Math.PI / 180;
+        const r = radius * (0.85 + Math.random() * 0.3) / 111;
+        waypoints.push({
+          lat: lat + r * Math.sin(angle),
+          lng: lng + r * Math.cos(angle)
+        });
+      }
+
+      // Route
+      let lastPt = { lat, lng };
+      for (let i = 0; i < waypoints.length; i++) {
+        const segment = await routeOSRM(lastPt, waypoints[i]);
+        if (segment && segment.length > 0) {
+          if (allCoords.length === 0) {
+            allCoords.push(...segment);
+          } else {
+            allCoords.push(...segment.slice(1));
+          }
+          lastPt = waypoints[i];
         }
-        lastPt = waypoints[i];
-        LOG.push(`  Segment ${i + 1}: ${segment.length} points`);
+      }
+
+      // Return to start
+      const returnSeg = await routeOSRM(lastPt, { lat, lng });
+      if (returnSeg && returnSeg.length > 0) {
+        allCoords.push(...returnSeg.slice(1));
+      }
+
+      // Calculate distance
+      if (allCoords.length >= 2) {
+        actualDist = 0;
+        for (let i = 0; i < allCoords.length - 1; i++) {
+          actualDist += haversine(allCoords[i][0], allCoords[i][1], 
+                                  allCoords[i + 1][0], allCoords[i + 1][1]);
+        }
+        LOG.push(`  Distance: ${actualDist.toFixed(2)}km (${((actualDist / targetKm) * 100).toFixed(0)}%)`);
+
+        // Check if close enough (within 10%)
+        if (actualDist >= targetKm * 0.9 && actualDist <= targetKm * 1.1) {
+          LOG.push(`SUCCESS: Within 10% of target`);
+          return respond(200, {
+            coordinates: allCoords,
+            distance: parseFloat(actualDist.toFixed(2)),
+            elevation: 50 + Math.round(actualDist / 2),
+            success: true,
+            pattern: "osrm-adaptive",
+            debug: LOG
+          });
+        }
+
+        // Adjust radius for next attempt
+        if (actualDist < targetKm * 0.8) {
+          radius *= 1.3;
+        } else if (actualDist > targetKm * 1.2) {
+          radius *= 0.7;
+        } else {
+          radius *= (targetKm / actualDist);
+        }
+      } else {
+        LOG.push(`  Failed to route`);
+        radius *= 1.2;
       }
     }
 
-    // Return to start
-    const returnSeg = await routeOSRM(lastPt, { lat, lng });
-    if (returnSeg && returnSeg.length > 0) {
-      allCoords.push(...returnSeg.slice(1));
-      LOG.push(`  Return: ${returnSeg.length} points`);
-    }
-
-    if (allCoords.length < 2) {
-      LOG.push("FAIL: No routes");
-      const fallback = circle(lat, lng, targetKm);
+    // After max attempts, use what we have
+    if (allCoords.length >= 2) {
+      LOG.push(`FINAL: ${actualDist.toFixed(2)}km after ${attempts} attempts`);
       return respond(200, {
-        coordinates: fallback,
-        distance: targetKm,
-        elevation: 50 + Math.round(targetKm / 2),
+        coordinates: allCoords,
+        distance: parseFloat(actualDist.toFixed(2)),
+        elevation: 50 + Math.round(actualDist / 2),
         success: true,
-        pattern: "fallback",
+        pattern: "osrm-adaptive",
         debug: LOG
       });
     }
 
-    // Distance
-    let totalDist = 0;
-    for (let i = 0; i < allCoords.length - 1; i++) {
-      totalDist += haversine(allCoords[i][0], allCoords[i][1], 
-                             allCoords[i + 1][0], allCoords[i + 1][1]);
-    }
-
-    LOG.push(`SUCCESS: ${allCoords.length} points, ${totalDist.toFixed(2)}km`);
-
+    // Fallback to circle
+    LOG.push("FALLBACK: Circle");
+    const fallback = circle(lat, lng, targetKm);
     return respond(200, {
-      coordinates: allCoords,
-      distance: parseFloat(totalDist.toFixed(2)),
-      elevation: 50 + Math.round(totalDist / 2),
+      coordinates: fallback,
+      distance: targetKm,
+      elevation: 50 + Math.round(targetKm / 2),
       success: true,
+      pattern: "fallback-circle",
       debug: LOG
     });
 
