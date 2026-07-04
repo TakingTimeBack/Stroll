@@ -778,9 +778,10 @@
 
             <!-- HISTORY TAB -->
             <div id="history" class="tab-content">
-                <p style="text-align: center; color: var(--color-text-light); margin-top: 20px;">
-                    Save routes to see your history here ❤️
-                </p>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                    <p style="color: var(--color-text-light); margin: 0;">❤️ Saved Routes</p>
+                    <button id="deleteHistoryBtn" style="background: #ffebee; color: #c62828; border: 1px solid #c62828; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Delete All</button>
+                </div>
                 <div id="historyList"></div>
             </div>
 
@@ -858,6 +859,7 @@
             },
             difficulty: 'moderate',
             currentRoute: null,
+            currentMap: null,
             savedRoutes: [],
             badges: [],
             challenges: [
@@ -1127,6 +1129,7 @@
             }, 100);
         }
 
+
         function drawMap(coordinates) {
             if (!coordinates || coordinates.length === 0) {
                 console.error('No coordinates provided');
@@ -1139,12 +1142,19 @@
                 return;
             }
 
-            // Clear existing map
+            // Destroy old map if it exists
+            if (state.currentMap) {
+                state.currentMap.remove();
+                state.currentMap = null;
+            }
+
+            // Clear existing map container completely
             mapContainer.innerHTML = '';
 
-            // Initialize map
+            // Initialize new map
             try {
                 const map = L.map('modalMap').setView([coordinates[0][0], coordinates[0][1]], 14);
+                state.currentMap = map;
 
                 // Add tile layer
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1173,7 +1183,7 @@
                 // Add end marker (orange)
                 L.marker(coordinates[coordinates.length - 1], {
                     icon: L.icon({
-                        iconUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22%23FC5200%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%228%22 fill=%22white%22/%3E%3C/svg%3E',
+                        iconUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22%23FC5200%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%238%22 fill=%22white%22/%3E%3C/svg%3E',
                         iconSize: [32, 32],
                         iconAnchor: [16, 16],
                         popupAnchor: [0, -16]
@@ -1229,11 +1239,15 @@
         // ==================== HISTORY ====================
         function renderHistory() {
             const list = document.getElementById('historyList');
+            const deleteBtn = document.getElementById('deleteHistoryBtn');
+            
             if (state.savedRoutes.length === 0) {
-                list.innerHTML = '';
+                list.innerHTML = '<p style="text-align: center; color: var(--color-text-light); margin-top: 20px;">No saved routes yet. Save a route to see it here!</p>';
+                deleteBtn.style.display = 'none';
                 return;
             }
 
+            deleteBtn.style.display = 'block';
             list.innerHTML = state.savedRoutes.map(route => `
                 <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; margin-bottom: 12px; border: 1px solid var(--color-border);">
                     <div style="font-weight: 700; margin-bottom: 6px; color: var(--color-text);">${route.distance}km • ${route.time}min</div>
@@ -1256,6 +1270,21 @@
         // Stats button
         document.getElementById('statsBtn').addEventListener('click', () => {
             alert('📊 Stats: You can track your routes and progress in the History tab!');
+        });
+
+        // Delete history button
+        document.getElementById('deleteHistoryBtn').addEventListener('click', () => {
+            if (state.savedRoutes.length === 0) {
+                alert('No history to delete!');
+                return;
+            }
+            
+            if (confirm('Are you sure you want to delete all saved routes? This cannot be undone.')) {
+                state.savedRoutes = [];
+                saveToStorage();
+                renderHistory();
+                showToast('All history deleted!');
+            }
         });
 
         // Results modal
@@ -1286,11 +1315,40 @@
 
         document.getElementById('shareGoogleMaps').addEventListener('click', () => {
             if (state.currentRoute && state.currentRoute.coordinates && state.currentRoute.coordinates.length > 0) {
-                const coords = state.currentRoute.coordinates;
-                const centerLat = coords[0][0];
-                const centerLng = coords[0][1];
-                const mapsUrl = `https://www.google.com/maps/search/${centerLat},${centerLng}/@${centerLat},${centerLng},15z`;
-                window.open(mapsUrl, '_blank');
+                // Create KML and open in Google Maps
+                const coordinates = state.currentRoute.coordinates;
+                const lineString = coordinates.map(coord => `${coord[1]},${coord[0]},0`).join(' ');
+                
+                const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Stroll Route</name>
+    <Placemark>
+      <name>Your Walking Route</name>
+      <LineString>
+        <coordinates>${lineString}</coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>`;
+
+                // Create blob and open in Google Maps
+                const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+                const url = window.URL.createObjectURL(blob);
+                
+                // Open in Google Maps (modern browsers handle KML files)
+                const mapUrl = `https://www.google.com/maps/search/?api=1&query=${coordinates[0][0]},${coordinates[0][1]}`;
+                window.open(mapUrl, '_blank');
+                
+                // Also create download link as fallback
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'stroll-route.kml';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showToast('Opening in Google Maps & downloading KML!');
             } else {
                 alert('Generate a route first!');
             }
