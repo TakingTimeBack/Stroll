@@ -1,91 +1,137 @@
 /**
- * STROLL INTELLIGENT PEDESTRIAN ROUTER - v2
- * Bulletproof error handling and logging
+ * STROLL INTELLIGENT PEDESTRIAN ROUTER - PRODUCTION
+ * Heavily instrumented for debugging, bulletproof logic
  */
 
 exports.handler = async (event) => {
+  const LOG = [];
+  
   try {
-    console.log('🚶 START: Stroll Router');
+    LOG.push('START');
     
     const body = JSON.parse(event.body);
     const { location, time, pace, preferences } = body;
-    console.log(`📍 Request: ${location}, ${time}min, ${pace}km/h`);
+    LOG.push(`INPUT: location=${location}, time=${time}, pace=${pace}`);
 
-    // Validate input
     if (!location || !time || !pace) {
-      return error(400, 'Missing location, time, or pace');
+      LOG.push('FAIL: Missing input');
+      return errorResponse(400, 'Missing location, time, or pace', LOG);
     }
 
-    // GEOCODE
+    // ===== GEOCODE =====
+    LOG.push('GEOCODING...');
     const coords = await geocodeLocation(location);
-    if (!coords) return error(400, 'Location not found');
+    if (!coords) {
+      LOG.push('FAIL: Geocoding failed');
+      return errorResponse(400, `Could not find location: ${location}`, LOG);
+    }
+    
     const [lat, lng] = coords;
-    console.log(`✅ Geocoded: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    LOG.push(`GEOCODED: lat=${lat.toFixed(4)}, lng=${lng.toFixed(4)}`);
 
-    // TARGET DISTANCE
+    // ===== DISTANCE =====
     const targetKm = (time / 60) * pace;
-    console.log(`📏 Target distance: ${targetKm.toFixed(1)}km`);
+    LOG.push(`TARGET_DISTANCE: ${targetKm.toFixed(2)}km`);
 
-    // FETCH WAYS
-    const radius = Math.max(500, Math.min(4000, targetKm * 2000));
-    console.log(`🗺️  Fetching ways (radius ${radius}m)...`);
+    // ===== FETCH WAYS =====
+    LOG.push('FETCHING_WAYS...');
+    const radius = Math.max(800, Math.min(5000, targetKm * 2500));
+    LOG.push(`SEARCH_RADIUS: ${radius}m`);
     
     const ways = await fetchAllWays(lat, lng, radius);
-    console.log(`📊 Fetched: ${ways.length} ways`);
+    LOG.push(`WAYS_FETCHED: ${ways.length}`);
 
-    if (ways.length === 0) {
-      return error(400, 'No map data for this location');
+    if (!ways || ways.length === 0) {
+      LOG.push('FAIL: No ways');
+      return errorResponse(400, 'No map data available', LOG);
     }
 
-    // WAYS ALREADY SCORED - just filter
-    console.log('⭐ Filtering walkable ways...');
-    const good = ways.filter(w => w.score >= 0.2);
-    console.log(`✅ ${good.length} walkable ways`);
+    // ===== VALIDATE WAYS =====
+    const validWays = ways.filter(w => w && w.nodes && w.nodes.length > 1);
+    LOG.push(`VALID_WAYS: ${validWays.length}/${ways.length}`);
 
-    if (good.length < 3) {
-      return error(400, `Only ${good.length} walkable ways - not enough for a route`);
+    if (validWays.length === 0) {
+      LOG.push('FAIL: No valid ways after filtering');
+      return errorResponse(400, 'No valid pedestrian infrastructure', LOG);
     }
 
-    // BUILD GRAPH
-    console.log('🔗 Building graph...');
-    const graph = buildGraph(good, lat, lng);
-    console.log(`✅ Graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+    // ===== FILTER WALKABLE =====
+    LOG.push('FILTERING_WALKABLE...');
+    const walkable = validWays.filter(w => {
+      try {
+        return scoreWay(w) >= 0.2;
+      } catch (err) {
+        LOG.push(`WARN: Scoring error on way ${w.id}: ${err.message}`);
+        return false;
+      }
+    });
 
-    if (graph.nodes.length < 3) {
-      return error(400, 'Graph too small');
+    LOG.push(`WALKABLE_WAYS: ${walkable.length}/${validWays.length}`);
+
+    if (walkable.length < 3) {
+      LOG.push(`FAIL: Only ${walkable.length} walkable ways`);
+      return errorResponse(400, `Only ${walkable.length} walkable ways found`, LOG);
     }
 
-    // ROUTE
-    console.log('🧭 Generating route...');
-    const route = genRoute(graph, lat, lng, targetKm);
+    // ===== BUILD GRAPH =====
+    LOG.push('BUILDING_GRAPH...');
+    let graph;
+    try {
+      graph = buildGraph(walkable, lat, lng);
+    } catch (err) {
+      LOG.push(`FAIL: Graph build error: ${err.message}`);
+      return errorResponse(500, `Graph error: ${err.message}`, LOG);
+    }
+
+    LOG.push(`GRAPH: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
+
+    if (graph.nodes.length < 3 || graph.edges.length < 2) {
+      LOG.push(`FAIL: Graph too sparse`);
+      return errorResponse(400, `Network too sparse: ${graph.nodes.length} nodes`, LOG);
+    }
+
+    // ===== GENERATE ROUTE =====
+    LOG.push('GENERATING_ROUTE...');
+    let route;
+    try {
+      route = generateRoute(graph, lat, lng, targetKm);
+    } catch (err) {
+      LOG.push(`FAIL: Route generation error: ${err.message}`);
+      return errorResponse(500, `Route error: ${err.message}`, LOG);
+    }
 
     if (!route || !route.coords || route.coords.length < 3) {
-      return error(400, 'Route generation failed');
+      LOG.push('FAIL: Route too short');
+      return errorResponse(400, `Generated route has ${route?.coords?.length || 0} points`, LOG);
     }
 
-    console.log(`✅ Route: ${route.dist.toFixed(1)}km, ${route.coords.length} points`);
+    LOG.push(`SUCCESS: ${route.coords.length} points, ${route.dist.toFixed(2)}km`);
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({
         coordinates: route.coords,
-        distance: route.dist,
+        distance: parseFloat(route.dist.toFixed(2)),
         elevation: Math.round(50 + route.dist / 2),
         duration: time,
         location,
         pattern: 'intelligent-pedestrian',
-        success: true
+        success: true,
+        debug: LOG
       })
     };
 
   } catch (err) {
-    console.error('❌ ERROR:', err.message);
-    console.error('Stack:', err.stack);
+    const msg = `${err.message} (${err.stack?.split('\n')[1] || 'unknown'})`;
+    LOG.push(`CRITICAL: ${msg}`);
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: `Server error: ${err.message}` })
+      body: JSON.stringify({
+        error: msg,
+        debug: LOG
+      })
     };
   }
 };
@@ -96,199 +142,317 @@ exports.handler = async (event) => {
 
 async function geocodeLocation(location) {
   try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`,
-      { headers: { 'User-Agent': 'Stroll' }, timeout: 10000 }
-    );
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Stroll' },
+      timeout: 10000
+    });
+
     const data = await response.json();
-    return data && data.length > 0 ? [parseFloat(data[0].lat), parseFloat(data[0].lon)] : null;
+    if (data && data.length > 0) {
+      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+    }
+    return null;
   } catch (err) {
-    console.error('Geocode error:', err.message);
     return null;
   }
 }
 
 // ============================================================
-// FETCH WAYS
+// FETCH WAYS - ROBUST
 // ============================================================
 
 async function fetchAllWays(lat, lng, radius) {
   const deg = radius / 111000;
-  const bbox = `${lat - deg},${lng - deg},${lat + deg},${lng + deg}`;
+  const n = lat + deg;
+  const s = lat - deg;
+  const e = lng + deg;
+  const w = lng - deg;
   
-  const query = `[bbox:${bbox}];(way["highway"];way["leisure"="park"];);out geom;`;
+  const query = `[bbox:${s},${w},${n},${e}];(way["highway"];way["leisure"="park"];way["leisure"="garden"];);out geom;`;
 
   try {
-    console.log(`  Overpass query bbox=${bbox.substring(0, 30)}...`);
     const response = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
       body: query,
-      timeout: 30000
+      timeout: 45000
     });
 
     if (!response.ok) {
-      console.warn(`  Overpass: status ${response.status}`);
-      return [];
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const data = await response.json();
-    if (!data.ways) {
-      console.warn('  No ways in response');
+    
+    if (!data || !data.ways) {
       return [];
     }
 
     const ways = [];
-    for (const w of data.ways) {
-      if (!w.geometry || w.geometry.length < 2) continue;
-      const score = scoreWay(w);
-      ways.push({
-        id: w.id,
-        nodes: w.geometry.map(g => ({ lat: g.lat, lon: g.lon })),
-        tags: w.tags || {},
-        score: score
-      });
+    for (const w of data.ways || []) {
+      if (!w.geometry || !Array.isArray(w.geometry) || w.geometry.length < 2) {
+        continue;
+      }
+
+      try {
+        const nodes = w.geometry.map(g => ({
+          lat: parseFloat(g.lat),
+          lon: parseFloat(g.lon)
+        }));
+
+        if (nodes.some(n => isNaN(n.lat) || isNaN(n.lon))) {
+          continue;
+        }
+
+        const score = scoreWay(w);
+        
+        ways.push({
+          id: w.id || Math.random(),
+          nodes,
+          tags: w.tags || {},
+          score
+        });
+      } catch (err) {
+        // Skip malformed ways
+        continue;
+      }
     }
 
-    console.log(`  Parsed: ${ways.length} ways with geometry`);
     return ways;
-
   } catch (err) {
-    console.error('  Fetch error:', err.message);
     return [];
   }
 }
 
 // ============================================================
-// SCORING
+// SCORING - ROBUST
 // ============================================================
 
 function scoreWay(way) {
-  const t = way.tags;
-  
-  // Blocks
-  if (t.access === 'private' || t.foot === 'no') return 0;
-  
-  // Base scores
-  if (t.highway === 'footway') return 1.0;
-  if (t.highway === 'pedestrian') return 0.9;
-  if (t.highway === 'path') return 0.85;
-  if (t.leisure === 'park') return 0.9;
-  if (t.highway === 'track') return 0.7;
-  
-  // Regular roads: start at 0.3, boost for features
-  let score = 0.3;
-  
-  if (t.sidewalk) score += 0.2;
-  if (t.foot === 'designated') score += 0.2;
-  if (t.lit === 'yes') score += 0.1;
-  
-  // Speed penalty
-  const speed = parseInt(t.maxspeed);
-  if (!isNaN(speed)) {
-    if (speed >= 70) score *= 0.4;
-    else if (speed >= 50) score *= 0.7;
-    else if (speed >= 40) score *= 0.85;
-  } else if (['motorway', 'trunk', 'primary'].includes(t.highway)) {
-    score *= 0.6;
+  try {
+    if (!way || !way.tags) return 0;
+    
+    const t = way.tags;
+
+    // Hard blocks
+    if (t.access === 'private' || t.access === 'no') return 0;
+    if (t.foot === 'no' || t.foot === 'discouraged') return 0;
+    if (t.motor_vehicle === 'only') return 0;
+
+    // Excellent
+    if (t.highway === 'footway') return 1.0;
+    if (t.highway === 'pedestrian') return 0.95;
+    if (t.highway === 'path' && t.foot !== 'no') return 0.90;
+    if (t.leisure === 'park' || t.leisure === 'garden') return 0.90;
+
+    // Good
+    if (t.highway === 'track') return 0.70;
+    if (t.highway === 'living_street') return 0.75;
+
+    // Medium roads - base score
+    let score = 0.35;
+
+    if (['residential', 'unclassified', 'tertiary'].includes(t.highway)) {
+      score = 0.50;
+    }
+
+    // Boosts
+    if (t.sidewalk) score = Math.min(1, score + 0.25);
+    if (t.foot === 'designated') score = Math.min(1, score + 0.20);
+    if (t.foot === 'permissive') score = Math.min(1, score + 0.10);
+    if (t.lit === 'yes') score = Math.min(1, score + 0.10);
+    if (t.surface === 'asphalt' || t.surface === 'concrete') score = Math.min(1, score + 0.05);
+
+    // Speed penalties
+    const speed = parseInt(t.maxspeed);
+    if (!isNaN(speed)) {
+      if (speed >= 80) score *= 0.3;
+      else if (speed >= 60) score *= 0.5;
+      else if (speed >= 50) score *= 0.7;
+      else if (speed >= 40) score *= 0.85;
+    } else if (['motorway', 'motorway_link'].includes(t.highway)) {
+      score *= 0.2;
+    } else if (['trunk', 'trunk_link', 'primary', 'primary_link'].includes(t.highway)) {
+      score *= 0.6;
+    } else if (['secondary', 'secondary_link'].includes(t.highway)) {
+      score *= 0.8;
+    }
+
+    return Math.max(0, Math.min(1, score));
+  } catch (err) {
+    return 0.35; // Safe default
   }
-  
-  return Math.max(0, Math.min(1, score));
 }
 
 // ============================================================
-// GRAPH
+// GRAPH BUILDING - ROBUST
 // ============================================================
 
-function buildGraph(ways, lat, lng) {
-  const nodes = new Map();
+function buildGraph(ways, centerLat, centerLng) {
+  const nodeMap = new Map();
   const edges = [];
-  let id = 0;
+  let nodeId = 0;
 
-  function getNode(lat, lon) {
+  const getNode = (lat, lon) => {
     const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
-    if (!nodes.has(key)) {
-      nodes.set(key, {
-        id: id++,
-        lat, lon,
-        dist: haversine(lat, lon, lat, lng),
+    if (!nodeMap.has(key)) {
+      const distToCenter = Math.sqrt(
+        (lat - centerLat) ** 2 + (lon - centerLng) ** 2
+      );
+      nodeMap.set(key, {
+        id: nodeId++,
+        lat,
+        lon,
+        distToCenter,
         edges: []
       });
     }
-    return nodes.get(key);
-  }
+    return nodeMap.get(key);
+  };
 
+  // Build graph
   for (const way of ways) {
-    const wayNodes = way.nodes.map(n => getNode(n.lat, n.lon));
+    if (!way.nodes || way.nodes.length < 2) continue;
+
+    const wayNodes = [];
+    for (const n of way.nodes) {
+      try {
+        wayNodes.push(getNode(n.lat, n.lon));
+      } catch (err) {
+        continue;
+      }
+    }
+
+    // Connect nodes
     for (let i = 0; i < wayNodes.length - 1; i++) {
       const from = wayNodes[i];
       const to = wayNodes[i + 1];
-      const d = haversine(from.lat, from.lon, to.lat, to.lon);
-      edges.push({ from: from.id, to: to.id, d, score: way.score });
+
+      const dist = haversine(from.lat, from.lon, to.lat, to.lon);
+      
+      edges.push({
+        from: from.id,
+        to: to.id,
+        dist,
+        score: way.score || 0.5
+      });
+
       from.edges.push(edges.length - 1);
     }
   }
 
-  return {
-    nodes: Array.from(nodes.values()),
-    edges
-  };
+  const nodes = Array.from(nodeMap.values());
+  return { nodes, edges, nodeMap };
 }
 
 // ============================================================
-// ROUTE GENERATION
+// ROUTE GENERATION - ROBUST
 // ============================================================
 
-function genRoute(graph, lat, lng, targetDist) {
+function generateRoute(graph, centerLat, centerLng, targetDist) {
   const { nodes, edges } = graph;
-  
-  // Create node lookup
+
+  if (!nodes || nodes.length < 3) {
+    throw new Error('Graph too small');
+  }
+
+  // Build node lookup
   const nodeById = {};
   for (const n of nodes) {
     nodeById[n.id] = n;
   }
-  
-  let current = nodes.reduce((a, b) => b.dist < a.dist ? b : a);
-  const route = [current];
-  const visited = new Set([current.id]);
-  let dist = 0;
-  let direction = 'out';
-  const threshold = targetDist * 0.75;
 
-  for (let i = 0; i < 500 && dist < targetDist * 1.2; i++) {
-    const available = (edges.filter(e => e.from === current.id && !visited.has(e.to)) || []);
-    
-    if (available.length === 0) break;
+  // Find best start: closest to center
+  let start = nodes[0];
+  for (const n of nodes) {
+    if (n.distToCenter < start.distToCenter) {
+      start = n;
+    }
+  }
 
-    let next;
-    if (direction === 'out' && dist < threshold) {
-      // Go away from center
-      next = available.reduce((a, b) => {
-        const an = nodeById[b.to];
-        const bn = nodeById[a.to];
-        return an.dist > bn.dist ? b : a;
+  const route = [start];
+  const visited = new Set([start.id]);
+  let totalDist = 0;
+  let phase = 'outbound';
+  const turnAroundDist = targetDist * 0.65;
+
+  let iterations = 0;
+  const maxIterations = 800;
+
+  while (iterations < maxIterations) {
+    iterations++;
+
+    // Get available edges from current node
+    const current = route[route.length - 1];
+    const available = edges
+      .filter(e => e.from === current.id && !visited.has(e.to))
+      .map(e => ({ ...e, toNode: nodeById[e.to] }))
+      .filter(e => e.toNode);
+
+    if (available.length === 0) {
+      // Try to find unvisited neighbor
+      let best = null;
+      let bestDist = Infinity;
+
+      for (const n of nodes) {
+        if (!visited.has(n.id)) {
+          const d = haversine(current.lat, current.lon, n.lat, n.lon);
+          if (d < bestDist) {
+            best = n;
+            bestDist = d;
+          }
+        }
+      }
+
+      if (best && bestDist < 0.05) {
+        // Jump to nearby unvisited node
+        visited.add(best.id);
+        route.push(best);
+        totalDist += bestDist;
+      } else {
+        break; // No more options
+      }
+      continue;
+    }
+
+    // Choose next edge
+    let nextEdge;
+
+    if (phase === 'outbound' && totalDist < turnAroundDist) {
+      // Go outward: prefer nodes farther from center
+      nextEdge = available.reduce((best, edge) => {
+        const isBetter = edge.toNode.distToCenter > best.toNode.distToCenter ||
+          (edge.toNode.distToCenter === best.toNode.distToCenter && edge.score > best.score);
+        return isBetter ? edge : best;
       });
     } else {
-      // Come back
-      direction = 'home';
-      next = available.reduce((a, b) => {
-        const an = nodeById[b.to];
-        const bn = nodeById[a.to];
-        return an.dist < bn.dist ? b : a;
+      // Return phase: prefer nodes closer to center
+      if (phase === 'outbound') phase = 'return';
+      nextEdge = available.reduce((best, edge) => {
+        const isBetter = edge.toNode.distToCenter < best.toNode.distToCenter ||
+          (edge.toNode.distToCenter === best.toNode.distToCenter && edge.score > best.score);
+        return isBetter ? edge : best;
       });
     }
 
-    if (!next) break;
+    if (!nextEdge) break;
 
-    const nextNode = nodeById[next.to];
-    dist += next.d;
-    visited.add(nextNode.id);
-    route.push(nextNode);
-    current = nextNode;
+    const next = nodeById[nextEdge.to];
+    totalDist += nextEdge.dist;
+    visited.add(next.id);
+    route.push(next);
+
+    // Stop if we've reached target
+    if (totalDist >= targetDist * 0.95) break;
+  }
+
+  if (route.length < 3) {
+    throw new Error('Route too short');
   }
 
   return {
     coords: route.map(n => [n.lat, n.lon]),
-    dist
+    dist: totalDist
   };
 }
 
@@ -297,7 +461,7 @@ function genRoute(graph, lat, lng, targetDist) {
 // ============================================================
 
 function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371;
+  const R = 6371; // km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 +
@@ -306,10 +470,13 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.asin(Math.sqrt(a));
 }
 
-function error(code, msg) {
+function errorResponse(code, message, logs) {
   return {
     statusCode: code,
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    body: JSON.stringify({ error: msg })
+    body: JSON.stringify({
+      error: message,
+      debug: logs
+    })
   };
 }
