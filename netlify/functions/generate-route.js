@@ -143,19 +143,27 @@ exports.handler = async (event) => {
 
         const route = routeData.routes[0];
         
-        // Validate: is distance reasonable?
-        if (validateRoute(route, distanceKm)) {
-          console.log('✅ Route accepted');
-          validRoute = route;
-        } else {
-          console.log('❌ Route rejected - regenerating...');
-          // Rotate waypoints slightly for next attempt
+        // Validate distance first
+        if (!validateRoute(route, distanceKm)) {
+          console.log('❌ Distance validation failed');
+          continue;
+        }
+        
+        // Then check for major roads
+        const hasMajorRoads = await checkForMajorRoads(route);
+        if (hasMajorRoads) {
+          console.log('❌ Major roads detected - regenerating...');
+          // Rotate waypoints for next attempt
           waypoints = waypoints.map((p, i) => {
             const angle = (i / waypoints.length) * Math.PI * 2 + (Math.random() - 0.5);
-            const offset = 0.0005;
+            const offset = 0.0008;
             return [p[0] + Math.cos(angle) * offset, p[1] + Math.sin(angle) * offset];
           });
+          continue;
         }
+        
+        console.log('✅ Route accepted - no major roads');
+        validRoute = route;
       } catch (err) {
         console.log('❌ Routing error:', err.message);
       }
@@ -198,19 +206,90 @@ exports.handler = async (event) => {
 
 
 function validateRoute(route, targetDistance) {
-  // Simple validation: check if route distance is reasonable
+  // Just basic sanity check
   const routeDistanceKm = route.distance / 1000;
-  
-  // If route is WAY longer than expected (>2x), it probably used major roads
-  const maxReasonable = Math.max(targetDistance * 1.8, 1);
+  const maxReasonable = Math.max(targetDistance * 2, 1);
   
   if (routeDistanceKm > maxReasonable) {
-    console.log(`⚠️ Route ${routeDistanceKm.toFixed(1)}km > max ${maxReasonable.toFixed(1)}km - suspect`);
-    return false; // Reject
+    console.log(`⚠️ Route too long: ${routeDistanceKm.toFixed(1)}km`);
+    return false;
   }
   
-  console.log(`✅ Route ${routeDistanceKm.toFixed(1)}km is reasonable`);
-  return true; // Accept
+  console.log(`✅ Route distance OK: ${routeDistanceKm.toFixed(1)}km`);
+  return true;
+}
+
+async function checkForMajorRoads(route) {
+  // Check if route actually overlaps with major roads
+  try {
+    const coords = route.geometry.coordinates;
+    
+    // Get bounding box
+    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    for (let coord of coords) {
+      minLng = Math.min(minLng, coord[0]);
+      maxLng = Math.max(maxLng, coord[0]);
+      minLat = Math.min(minLat, coord[1]);
+      maxLat = Math.max(maxLat, coord[1]);
+    }
+    
+    // Expand bbox
+    const padding = 0.005;
+    const bbox = `${minLat - padding},${minLng - padding},${maxLat + padding},${maxLng + padding}`;
+    
+    console.log('🛣️  Checking for motorways/A-roads...');
+    
+    const query = `[bbox:${bbox}];(way["highway"="motorway"];way["highway"="trunk"];way["highway"="primary"];);out geom;`;
+    
+    const resp = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: query
+    });
+    
+    if (!resp.ok) return false; // On error, assume it's OK
+    
+    const data = await resp.json();
+    const roads = data.elements || [];
+    
+    console.log(`Found ${roads.length} major roads in area`);
+    
+    if (roads.length === 0) {
+      console.log('✅ No major roads in area');
+      return false; // No major roads = good
+    }
+    
+    // Check if route coordinates are too close to any major road
+    const buffer = 0.0008; // ~80 meters
+    
+    for (let road of roads) {
+      if (!road.geometry) continue;
+      
+      for (let roadCoord of road.geometry) {
+        for (let routeCoord of coords) {
+          const lat1 = routeCoord[1];
+          const lng1 = routeCoord[0];
+          const lat2 = roadCoord.lat;
+          const lng2 = roadCoord.lon;
+          
+          const latDiff = lat1 - lat2;
+          const lngDiff = lng1 - lng2;
+          const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff);
+          
+          if (distance < buffer) {
+            console.log(`❌ Route TOO CLOSE to major road (${(distance * 111000).toFixed(0)}m)`);
+            return true; // Found major road = bad
+          }
+        }
+      }
+    }
+    
+    console.log('✅ Route keeps safe distance from major roads');
+    return false; // No close roads = good
+    
+  } catch (error) {
+    console.log('⚠️  Overpass check failed:', error.message);
+    return false; // On error, assume OK (conservative)
+  }
 }
 
 function fallbackRoute(centerLat, centerLng, distanceKm, difficulty, pattern) {
