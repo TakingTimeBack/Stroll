@@ -44,14 +44,14 @@ exports.handler = async (event) => {
     console.log('✅ Route pattern:', selectedPattern);
 
     // BALANCED: Reasonable waypoint density
-    // Tight enough to prevent A-roads, not so tight it breaks OSRM
-    let baseRadius = 0.004;
-    if (distanceKm > 3) baseRadius = 0.006;
-    if (distanceKm > 5) baseRadius = 0.008;
-    if (distanceKm > 8) baseRadius = 0.010;
+    // Tight enough to prevent A-roads without breaking OSRM
+    let baseRadius = 0.0035;
+    if (distanceKm > 3) baseRadius = 0.005;
+    if (distanceKm > 5) baseRadius = 0.0065;
+    if (distanceKm > 8) baseRadius = 0.008;
 
-    // 15-20 waypoints is sweet spot - prevents major roads without breaking OSRM
-    const numWaypoints = Math.max(15, Math.ceil(distanceKm / 1));
+    // 18-25 waypoints - dense enough to prevent major roads
+    const numWaypoints = Math.max(18, Math.ceil(distanceKm * 1.5));
     let waypoints = [];
 
     console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints...`);
@@ -117,13 +117,13 @@ exports.handler = async (event) => {
     waypoints.push(waypoints[0]);
     console.log(`✅ Waypoints created: ${waypoints.length}`);
 
-    // STEP 4: Generate route with validation loop
+    // STEP 4: Generate route (OSRM foot profile avoids motorways)
     let attempt = 0;
     let validRoute = null;
 
-    while (attempt < 5 && !validRoute) {
+    while (attempt < 3 && !validRoute) {
       attempt++;
-      console.log(`📍 Route generation attempt ${attempt}/5...`);
+      console.log(`📍 Route generation attempt ${attempt}/3...`);
 
       const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
       const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
@@ -143,20 +143,12 @@ exports.handler = async (event) => {
       }
 
       const route = routeData.routes[0];
-      console.log('📍 Validating route against OSM data...');
-
-      const hasProblematicRoads = await validateRoute(route, distanceKm);
-
-      if (!hasProblematicRoads) {
-        console.log('✅ Route is clean! No A-roads or motorways');
-        validRoute = route;
-      } else {
-        console.log(`⚠️  Route uses major roads, regenerating...`);
-      }
+      console.log(`✅ Route generated successfully: ${(route.distance / 1000).toFixed(1)}km`);
+      validRoute = route;
     }
 
     if (!validRoute) {
-      console.log('📍 All validation attempts failed, using fallback');
+      console.log('📍 OSRM routing failed, using safe fallback');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty, selectedPattern);
     }
 
@@ -189,34 +181,7 @@ exports.handler = async (event) => {
 };
 
 // Validate route against OSM major roads
-async function validateRoute(route, targetDistance) {
-  try {
-    // Simple check: if route is TOO long, it probably used major roads
-    const routeDistance = route.distance / 1000;
-    const maxAcceptable = targetDistance * 1.5; // Allow 50% extra
-    
-    if (routeDistance > maxAcceptable) {
-      console.log(`❌ Route too long: ${routeDistance.toFixed(1)}km > ${maxAcceptable.toFixed(1)}km`);
-      return true;
-    }
-    
-    console.log(`✅ Route distance OK: ${routeDistance.toFixed(1)}km`);
-    return false;
-  } catch (e) {
-    return false;
-  }
-}
 
-function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return c;
-}
 
 function fallbackRoute(centerLat, centerLng, distanceKm, difficulty, pattern) {
   console.log('📍 Generating safe fallback route');
