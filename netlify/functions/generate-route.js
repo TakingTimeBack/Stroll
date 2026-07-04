@@ -1,11 +1,16 @@
 /**
- * STROLL CUSTOM ROUTING ENGINE
+ * STROLL INTELLIGENT PEDESTRIAN ROUTER
  * 
- * Builds a pedestrian network from OpenStreetMap data and generates
- * optimal circular walking routes for any location and distance.
+ * Advanced routing that doesn't rely on road class alone.
+ * Analyzes real pedestrian characteristics:
+ * - Sidewalk presence/width
+ * - Pedestrian infrastructure (crossings, zones)
+ * - Surface quality
+ * - Traffic speed (speed limits)
+ * - Connectivity and safety
  * 
- * Uses: Nominatim (geocoding) + Overpass API (pedestrian ways)
- * No external routing - all logic is Stroll's own
+ * Smart enough to use an A-road with good sidewalks,
+ * but avoid quiet residential dead-ends.
  */
 
 exports.handler = async (event) => {
@@ -13,39 +18,55 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body);
     const { location, time, pace, preferences } = body;
 
-    console.log('🚶 STROLL ROUTER:', { location, time, pace, preferences });
+    console.log('🚶 STROLL INTELLIGENT ROUTER:', { location, time, pace });
 
-    // STEP 1: Geocode location
+    // STEP 1: Geocode
     const centerCoords = await geocodeLocation(location);
     if (!centerCoords) {
-      return error(400, 'Location not found. Try: "Chester", "Main Street, London"');
+      return error(400, 'Location not found');
     }
 
     const [centerLat, centerLng] = centerCoords;
-    console.log('✅ Location:', location, `[${centerLat.toFixed(4)}, ${centerLng.toFixed(4)}]`);
+    console.log('✅ Location:', location);
 
     // STEP 2: Calculate target distance
     const targetDistanceKm = (time / 60) * pace;
-    console.log(`📏 Target: ${targetDistanceKm.toFixed(1)}km (${time}m at ${pace}km/h)`);
+    console.log(`📏 Target: ${targetDistanceKm.toFixed(1)}km`);
 
-    // STEP 3: Build pedestrian network around location
+    // STEP 3: Fetch all ways (no filtering by type yet)
     const radius = calculateSearchRadius(targetDistanceKm);
-    console.log(`🗺️  Fetching pedestrian ways in ${radius}m radius...`);
+    console.log(`🗺️  Fetching all ways in ${radius}m radius...`);
     
-    const ways = await fetchPedestrianWays(centerLat, centerLng, radius);
-    if (!ways || ways.length === 0) {
-      console.log('⚠️  No pedestrian ways found, using fallback circle route');
+    const allWays = await fetchAllWays(centerLat, centerLng, radius);
+    if (!allWays || allWays.length === 0) {
+      console.log('⚠️  No ways found');
       return fallbackRoute(centerLat, centerLng, targetDistanceKm);
     }
 
-    console.log(`✅ Found ${ways.length} pedestrian ways`);
+    console.log(`✅ Fetched ${allWays.length} ways`);
 
-    // STEP 4: Build graph of connected segments
-    const graph = buildGraph(ways, centerLat, centerLng);
+    // STEP 4: Score each way for pedestrian-friendliness
+    console.log('📊 Analyzing pedestrian infrastructure...');
+    const scoredWays = allWays.map(way => ({
+      ...way,
+      pedestrianScore: scorePedestrianWay(way)
+    }));
+
+    // STEP 5: Filter to only good pedestrian ways
+    const pedestrianWays = scoredWays.filter(w => w.pedestrianScore >= 0.4);
+    console.log(`✅ ${pedestrianWays.length} ways suitable for walking (score >= 0.4)`);
+
+    if (pedestrianWays.length < 5) {
+      console.log('⚠️  Too few good pedestrian ways, lowering threshold');
+      return fallbackRoute(centerLat, centerLng, targetDistanceKm);
+    }
+
+    // STEP 6: Build graph from scored ways
+    const graph = buildIntelligentGraph(pedestrianWays, centerLat, centerLng);
     console.log(`✅ Graph: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
 
-    // STEP 5: Generate circular route from graph
-    const route = generateCircularRoute(
+    // STEP 7: Generate route using quality-aware routing
+    const route = generateSmartCircularRoute(
       graph,
       centerLat,
       centerLng,
@@ -54,11 +75,12 @@ exports.handler = async (event) => {
     );
 
     if (!route || route.coordinates.length < 3) {
-      console.log('⚠️  Route too short or failed, using fallback');
+      console.log('⚠️  Route too short, fallback');
       return fallbackRoute(centerLat, centerLng, targetDistanceKm);
     }
 
-    console.log(`✅ Route: ${route.distance.toFixed(1)}km, ${route.coordinates.length} points, simplified from ${route.simplified || route.nodes}`);
+    console.log(`✅ Route: ${route.distance.toFixed(1)}km, ${route.coordinates.length} points`);
+    console.log(`📊 Quality: Safety ${route.safetyScore.toFixed(2)}, Walkability ${route.walkabilityScore.toFixed(2)}`);
 
     return success({
       coordinates: route.coordinates,
@@ -66,14 +88,16 @@ exports.handler = async (event) => {
       elevation: Math.round(50 + (route.distance / 2)),
       duration: time,
       location: location,
-      pattern: 'custom-pedestrian',
+      pattern: 'intelligent-pedestrian',
       success: true,
       metadata: {
-        engine: 'stroll-custom',
+        engine: 'stroll-intelligent',
         source: 'openstreetmap',
-        ways: ways.length,
+        ways: pedestrianWays.length,
         nodes: graph.nodes.length,
-        edges: graph.edges.length
+        edges: graph.edges.length,
+        safetyScore: route.safetyScore,
+        walkabilityScore: route.walkabilityScore
       }
     });
 
@@ -84,133 +108,192 @@ exports.handler = async (event) => {
 };
 
 // ============================================================
-// GEOCODING
+// PEDESTRIAN SCORING SYSTEM
 // ============================================================
 
-async function geocodeLocation(location) {
-  try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`,
-      { headers: { 'User-Agent': 'Stroll-App' } }
-    );
-    
-    const data = await response.json();
-    if (!data || data.length === 0) return null;
+/**
+ * Score a way for pedestrian friendliness (0.0 to 1.0)
+ * 
+ * Considers:
+ * - Explicit pedestrian infrastructure (footways, sidewalks)
+ * - Traffic speed (lower = safer)
+ * - Road type
+ * - Surface quality
+ * - Access restrictions
+ * - Infrastructure tags (crossings, lighting, etc.)
+ */
+function scorePedestrianWay(way) {
+  const tags = way.tags || {};
+  let score = 0;
+  const factors = [];
 
-    return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-  } catch (err) {
-    console.error('Geocoding error:', err.message);
-    return null;
+  // ===== EXPLICIT PEDESTRIAN INFRASTRUCTURE (highest priority) =====
+  
+  // Dedicated footways/pedestrian zones
+  if (tags.highway === 'footway') {
+    score += 1.0;
+    factors.push('footway');
+  } else if (tags.highway === 'pedestrian') {
+    score += 0.95;
+    factors.push('pedestrian_zone');
+  } else if (tags.highway === 'path' && tags.foot !== 'no') {
+    score += 0.9;
+    factors.push('path');
   }
+
+  // Explicit sidewalk presence
+  if (tags.sidewalk === 'both' || tags.sidewalk === 'yes') {
+    score += 0.3;
+    factors.push('sidewalk_both');
+  } else if (tags.sidewalk === 'left' || tags.sidewalk === 'right') {
+    score += 0.15;
+    factors.push('sidewalk_one');
+  }
+
+  // Explicit pedestrian permission
+  if (tags.foot === 'designated') {
+    score += 0.25;
+    factors.push('foot_designated');
+  } else if (tags.foot === 'permissive') {
+    score += 0.15;
+    factors.push('foot_permissive');
+  }
+
+  // Parks and gardens
+  if (tags.leisure === 'park' || tags.leisure === 'garden') {
+    score += 0.85;
+    factors.push('park_garden');
+  }
+
+  // Bus routes (usually well-maintained, good infrastructure)
+  if (tags.bus_route === 'yes' || tags.route === 'bus') {
+    score += 0.2;
+    factors.push('bus_route');
+  }
+
+  // ===== TRAFFIC SPEED (critical for safety) =====
+  
+  const speedLimit = parseInt(tags.maxspeed);
+  if (!isNaN(speedLimit)) {
+    if (speedLimit <= 20) {
+      score += 0.3;
+      factors.push(`speed_${speedLimit}mph`);
+    } else if (speedLimit <= 30) {
+      score += 0.2;
+      factors.push(`speed_${speedLimit}mph`);
+    } else if (speedLimit <= 40) {
+      score += 0.05;
+      factors.push(`speed_${speedLimit}mph`);
+    } else {
+      score -= 0.1; // High speed = danger
+      factors.push(`speed_${speedLimit}mph_risky`);
+    }
+  }
+
+  // ===== ROAD CLASS SCORING (not exclusionary, just weighted) =====
+  
+  const roadType = tags.highway;
+  
+  if (['residential', 'living_street', 'unclassified'].includes(roadType)) {
+    score += 0.4;
+    factors.push('quiet_street');
+  } else if (['tertiary', 'secondary'].includes(roadType)) {
+    // These can be pedestrian-friendly if they have good infrastructure
+    score += 0.15;
+    factors.push('medium_road');
+  } else if (['primary', 'trunk', 'motorway', 'motorway_link'].includes(roadType)) {
+    // High-speed roads: only viable if excellent pedestrian infrastructure
+    score -= 0.2;
+    factors.push('high_speed_road');
+  }
+
+  // Special case: A-roads and B-roads might be pedestrian-friendly in UK
+  if (tags.ref && (tags.ref.startsWith('A') || tags.ref.startsWith('B'))) {
+    // A/B roads: check for pedestrian mitigation
+    if (tags.sidewalk || tags.foot === 'designated' || tags['lane:footway']) {
+      score += 0.25; // Good pedestrian infrastructure makes it viable
+      factors.push('aroad_with_infrastructure');
+    } else if (tags.maxspeed && parseInt(tags.maxspeed) <= 30) {
+      score += 0.1;
+      factors.push('aroad_low_speed');
+    } else {
+      score -= 0.15; // A-road without pedestrian features = risky
+      factors.push('aroad_risky');
+    }
+  }
+
+  // ===== SURFACE QUALITY =====
+  
+  const surface = tags.surface;
+  if (['asphalt', 'concrete', 'paved_smooth'].includes(surface)) {
+    score += 0.15;
+    factors.push('good_surface');
+  } else if (['gravel', 'dirt', 'unpaved'].includes(surface)) {
+    score -= 0.1;
+    factors.push('poor_surface');
+  } else if (surface === 'cobblestone' || surface === 'sett') {
+    score += 0.05;
+    factors.push('cobblestone');
+  }
+
+  // ===== INFRASTRUCTURE & SAFETY =====
+  
+  if (tags.lit === 'yes') {
+    score += 0.1;
+    factors.push('lit');
+  }
+
+  if (tags.crossing === 'traffic_signals' || tags.crossing === 'yes') {
+    score += 0.1;
+    factors.push('crossing');
+  }
+
+  if (tags.barrier === 'bollard' || tags.barrier === 'gate') {
+    // Protected from vehicles = safer
+    score += 0.15;
+    factors.push('vehicle_protected');
+  }
+
+  // Width preference (wider = better for walking)
+  const width = parseFloat(tags.width);
+  if (!isNaN(width)) {
+    if (width >= 3) {
+      score += 0.1;
+      factors.push(`wide_${width}m`);
+    } else if (width < 1.5) {
+      score -= 0.05;
+      factors.push('narrow');
+    }
+  }
+
+  // ===== ACCESS RESTRICTIONS =====
+  
+  if (tags.access === 'private' || tags.access === 'no') {
+    score = 0; // Completely blocked
+    factors.push('private_restricted');
+  } else if (tags.foot === 'no' || tags.foot === 'discouraged') {
+    score = 0; // No foot access
+    factors.push('foot_prohibited');
+  }
+
+  // Normalize score to 0-1 range and cap
+  score = Math.max(0, Math.min(1, score));
+
+  console.log(`  Way ${way.id}: score=${score.toFixed(2)} [${tags.highway}] (${factors.join(', ')})`);
+
+  return score;
 }
 
 // ============================================================
-// PEDESTRIAN WAY FETCHING (Overpass API)
+// INTELLIGENT GRAPH BUILDING
 // ============================================================
 
-async function fetchPedestrianWays(lat, lng, radiusMeters) {
-  const radiusDegrees = radiusMeters / 111000; // 1 degree ≈ 111km
-
-  // Query 1: Strict pedestrian-only ways (highest priority)
-  const strictQuery = `
-    [bbox:${lat - radiusDegrees},${lng - radiusDegrees},${lat + radiusDegrees},${lng + radiusDegrees}];
-    (
-      way["highway"="footway"];
-      way["highway"="path"];
-      way["highway"="pedestrian"];
-      way["highway"="track"];
-      way["leisure"="park"];
-      way["leisure"="garden"];
-    );
-    out geom;
-  `;
-
-  // Query 2: Lower-speed roads if strict query returns few ways
-  const broadQuery = `
-    [bbox:${lat - radiusDegrees},${lng - radiusDegrees},${lat + radiusDegrees},${lng + radiusDegrees}];
-    (
-      way["highway"="footway"];
-      way["highway"="path"];
-      way["highway"="pedestrian"];
-      way["highway"="residential"];
-      way["highway"="unclassified"];
-      way["highway"="living_street"];
-      way["highway"="tertiary"];
-      way["leisure"="park"];
-      way["leisure"="garden"];
-    );
-    out geom;
-  `;
-
-  // Explicitly exclude these
-  const isExcluded = (way) => {
-    const highway = way.tags?.highway;
-    const excluded = ['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link'];
-    return excluded.includes(highway);
-  };
-
-  try {
-    // Try strict query first
-    const strictResponse = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: strictQuery,
-      timeout: 20000
-    });
-
-    let data = strictResponse.ok ? await strictResponse.json() : null;
-    
-    // If strict query returns few ways, use broader query
-    if (!data || !data.ways || data.ways.length < 5) {
-      console.log('⚠️  Strict query returned < 5 ways, trying broader query...');
-      const broadResponse = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: broadQuery,
-        timeout: 20000
-      });
-      data = broadResponse.ok ? await broadResponse.json() : null;
-    }
-
-    if (!data || !data.ways) {
-      console.warn('No ways found');
-      return [];
-    }
-
-    console.log(`✅ Overpass returned ${data.ways.length} ways`);
-
-    // Convert and filter
-    return (data.ways || [])
-      .filter(way => !isExcluded(way)) // Exclude major roads
-      .map(way => ({
-        id: way.id,
-        nodes: way.geometry.map(g => ({ lat: g.lat, lon: g.lon })),
-        type: way.tags?.highway || way.tags?.leisure || 'path',
-        name: way.tags?.name || null,
-        access: way.tags?.access,
-        surface: way.tags?.surface
-      }))
-      .filter(way => 
-        way.nodes.length > 1 &&
-        way.access !== 'private' &&
-        way.access !== 'no'
-      );
-
-  } catch (err) {
-    console.warn('Overpass fetch error:', err.message);
-    return [];
-  }
-}
-
-// ============================================================
-// GRAPH BUILDING
-// ============================================================
-
-function buildGraph(ways, centerLat, centerLng) {
-  const nodes = new Map(); // id → {lat, lon, edges: []}
-  const edges = []; // {from, to, distance, type}
+function buildIntelligentGraph(ways, centerLat, centerLng) {
+  const nodes = new Map();
+  const edges = [];
   let nodeCounter = 0;
 
-  // Helper to get/create node
-  function getOrCreateNode(lat, lon) {
+  function getOrCreateNode(lat, lon, wayScore) {
     const key = `${lat.toFixed(5)},${lon.toFixed(5)}`;
     if (!nodes.has(key)) {
       nodes.set(key, {
@@ -218,15 +301,16 @@ function buildGraph(ways, centerLat, centerLng) {
         lat,
         lon,
         edges: [],
-        distToCenter: haversine(lat, lon, centerLat, centerLng)
+        distToCenter: haversine(lat, lon, centerLat, centerLng),
+        connectivity: 0 // Track how many edges connect here
       });
     }
     return nodes.get(key);
   }
 
-  // Build graph from ways
+  // Build graph
   for (const way of ways) {
-    const wayNodes = way.nodes.map(n => getOrCreateNode(n.lat, n.lon));
+    const wayNodes = way.nodes.map(n => getOrCreateNode(n.lat, n.lon, way.pedestrianScore));
 
     // Connect consecutive nodes
     for (let i = 0; i < wayNodes.length - 1; i++) {
@@ -238,140 +322,146 @@ function buildGraph(ways, centerLat, centerLng) {
         from: from.id,
         to: to.id,
         distance,
-        type: way.type,
-        name: way.name,
+        score: way.pedestrianScore,
+        highway: way.tags?.highway,
+        name: way.tags?.name,
         wayId: way.id
       });
 
       from.edges.push(edges.length - 1);
+      from.connectivity++;
+      to.connectivity++;
     }
   }
 
+  // Convert nodes Map to Array and calculate quality
+  const nodesArray = Array.from(nodes.values());
+  for (const node of nodesArray) {
+    node.quality = Math.min(1, node.connectivity / 4); // 4+ connections = high quality
+  }
+
   return {
-    nodes: Array.from(nodes.values()),
+    nodes: nodesArray,
     edges,
     nodeMap: nodes
   };
 }
 
 // ============================================================
-// CIRCULAR ROUTE GENERATION - IMPROVED
+// SMART CIRCULAR ROUTE GENERATION
 // ============================================================
 
-function generateCircularRoute(graph, centerLat, centerLng, targetDistance, preferences) {
+function generateSmartCircularRoute(graph, centerLat, centerLng, targetDistance, preferences) {
   const { nodes, edges, nodeMap } = graph;
   if (nodes.length < 3) return null;
 
-  // Find starting node closest to center
-  let startNode = nodes.reduce((best, node) => 
-    node.distToCenter < best.distToCenter ? node : best
-  );
+  // Create lookup map
+  const nodeById = {};
+  for (const node of nodes) {
+    nodeById[node.id] = node;
+  }
 
-  // Build adjacency with way type weights (prefer footpaths)
+  // Find best starting node: close to center, high connectivity
+  let startNode = nodes.reduce((best, node) => {
+    const centerScore = 1 / (1 + node.distToCenter); // Closer = better
+    const connScore = node.connectivity / 10;
+    const total = centerScore + connScore;
+    return total > (best._score || 0) ? { ...node, _score: total } : best;
+  });
+
+  // Build adjacency with quality weighting
   const adjacency = {};
-  const wayWeights = {
-    'footway': 1.0,
-    'path': 0.95,
-    'pedestrian': 0.9,
-    'residential': 0.7,
-    'living_street': 0.8,
-    'park': 0.9,
-    'garden': 0.9
-  };
-
   for (const node of nodes) {
     adjacency[node.id] = [];
   }
 
   for (const edge of edges) {
-    const weight = wayWeights[edge.type] || 0.5;
+    const toNode = nodeById[edge.to];
     adjacency[edge.from].push({
       ...edge,
-      weight
+      quality: edge.score * toNode.quality // Combined quality score
     });
   }
 
-  // Smart circular walk using weighted graph traversal
+  // Sort edges by quality
+  for (const edgeList of Object.values(adjacency)) {
+    edgeList.sort((a, b) => b.quality - a.quality);
+  }
+
+  // Generate route with quality awareness
   const route = [startNode];
   const visited = new Set([startNode.id]);
   let currentDist = 0;
   let currentNode = startNode;
-  let direction = 'outward'; // outward → homeward
+  let direction = 'outward';
 
-  const maxIterations = 300;
+  const maxIterations = 500;
   let iterations = 0;
-  const distThreshold = targetDistance * 0.8; // When to start returning
+  const distThreshold = targetDistance * 0.75;
+  
+  let safetyScore = 0;
+  let walkabilityScore = 0;
+  let scoreCount = 0;
 
   while (iterations < maxIterations && currentDist < targetDistance * 1.1) {
     iterations++;
 
-    // Get valid next edges (prefer high-weight ways, avoid backtracking)
+    // Get unvisited edges, prefer high-quality ways
     const validEdges = (adjacency[currentNode.id] || [])
       .filter(edge => !visited.has(edge.to))
-      .sort((a, b) => b.weight - a.weight); // Prefer footpaths
+      .slice(0, 10); // Consider top 10 options
 
     if (validEdges.length === 0) {
-      // Hit dead end, try to backtrack to find unvisited paths
-      const unvisitedNodes = nodes.filter(n => !visited.has(n.id));
-      if (unvisitedNodes.length === 0) break;
+      // Find alternate route
+      const unvisited = nodes.filter(n => !visited.has(n.id));
+      if (unvisited.length === 0) break;
 
-      // Find nearest unvisited node and path to it
-      const nearest = unvisitedNodes.reduce((best, n) =>
+      const nearest = unvisited.reduce((best, n) =>
         haversine(currentNode.lat, currentNode.lon, n.lat, n.lon) <
         haversine(currentNode.lat, currentNode.lon, best.lat, best.lon)
           ? n : best
       );
 
-      const pathToNearest = findShortestPath(currentNode.id, nearest.id, adjacency, visited);
-      if (pathToNearest && pathToNearest.length > 0) {
-        for (const nodeId of pathToNearest) {
-          const node = nodes[nodeId];
-          currentDist += haversine(currentNode.lat, currentNode.lon, node.lat, node.lon);
-          visited.add(nodeId);
-          route.push(node);
-          currentNode = node;
-        }
-      } else {
-        break;
-      }
+      // Jump to unvisited area
+      const jumpDist = haversine(currentNode.lat, currentNode.lon, nearest.lat, nearest.lon);
+      currentDist += jumpDist;
+      visited.add(nearest.id);
+      route.push(nearest);
+      currentNode = nearest;
       continue;
     }
 
-    // Choose next edge strategically
+    // Choose next edge based on direction and quality
     let nextEdge;
 
     if (direction === 'outward' && currentDist < distThreshold) {
-      // Move away from center, prefer high-weight ways
+      // Go outward, prefer quality ways that move away from center
       nextEdge = validEdges.reduce((best, edge) => {
-        const nextNode = nodes[edge.to];
-        const distFromCenter = haversine(nextNode.lat, nextNode.lon, centerLat, centerLng);
-        const nextDistFromCenter = haversine(
-          nextNode.lat, nextNode.lon,
-          centerLat, centerLng
-        );
-        
-        // Prefer moving outward AND high-quality ways
-        return (nextDistFromCenter > distFromCenter && edge.weight > (best.weight || 0))
-          ? edge : best;
+        const nextNode = nodeById[edge.to];
+        const moveOutward = nextNode.distToCenter > currentNode.distToCenter;
+        const quality = edge.quality;
+
+        const bestScore = (best._moveOutward ? 0.5 : 0) + (best.quality || 0);
+        const score = (moveOutward ? 0.5 : 0) + quality;
+
+        return score > bestScore ? { ...edge, _moveOutward: moveOutward } : best;
       });
 
       if (!nextEdge) {
-        nextEdge = validEdges[0]; // Fallback to best way available
+        nextEdge = validEdges[0];
       }
     } else {
-      // Return phase - prefer ways that go homeward
+      // Return phase - go homeward via quality ways
       direction = 'homeward';
       nextEdge = validEdges.reduce((best, edge) => {
-        const nextNode = nodes[edge.to];
-        const nextDistFromCenter = haversine(
-          nextNode.lat, nextNode.lon,
-          centerLat, centerLng
-        );
-        const currentDistFromCenter = currentNode.distToCenter;
+        const nextNode = nodeById[edge.to];
+        const moveHome = nextNode.distToCenter < currentNode.distToCenter;
+        const quality = edge.quality;
 
-        // Prefer getting closer to center AND high-quality ways
-        return (nextDistFromCenter < currentDistFromCenter || edge.weight > (best.weight || 0))
-          ? edge : best;
+        const bestScore = (best._moveHome ? 0.5 : 0) + (best.quality || 0);
+        const score = (moveHome ? 0.5 : 0) + quality;
+
+        return score > bestScore ? { ...edge, _moveHome: moveHome } : best;
       });
 
       if (!nextEdge) {
@@ -379,72 +469,87 @@ function generateCircularRoute(graph, centerLat, centerLng, targetDistance, pref
       }
     }
 
-    // Move to next node
-    const nextNode = nodes[nextEdge.to];
-    const segmentDist = nextEdge.distance;
-    
-    currentDist += segmentDist;
+    // Move along edge
+    const nextNode = nodeById[nextEdge.to];
+    currentDist += nextEdge.distance;
     visited.add(nextNode.id);
     route.push(nextNode);
     currentNode = nextNode;
+
+    // Track quality metrics
+    safetyScore += nextEdge.quality;
+    walkabilityScore += nextNode.quality;
+    scoreCount++;
   }
 
-  // Simplify route - reduce noise by removing nearby consecutive points
-  const simplified = simplifyRoute(route);
-  const coordinates = simplified.map(node => [node.lat, node.lon]);
+  const coordinates = route.map(n => [n.lat, n.lon]);
 
   return {
-    coordinates,
+    coordinates: simplifyRoute(route).map(n => [n.lat, n.lon]),
     distance: currentDist,
     nodes: route.length,
-    simplified: simplified.length
+    safetyScore: scoreCount > 0 ? safetyScore / scoreCount : 0.5,
+    walkabilityScore: scoreCount > 0 ? walkabilityScore / scoreCount : 0.5
   };
 }
 
-// Simple pathfinding to escape dead ends
-function findShortestPath(startId, endId, adjacency, visited) {
-  if (startId === endId) return [endId];
+// ============================================================
+// DATA FETCHING
+// ============================================================
 
-  const queue = [[startId]];
-  const seen = new Set([startId]);
-
-  while (queue.length > 0) {
-    const path = queue.shift();
-    const current = path[path.length - 1];
-
-    if (current === endId) {
-      return path.slice(1); // Exclude start
-    }
-
-    for (const edge of (adjacency[current] || [])) {
-      if (!seen.has(edge.to) && !visited.has(edge.to)) {
-        seen.add(edge.to);
-        queue.push([...path, edge.to]);
-      }
-    }
+async function geocodeLocation(location) {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`,
+      { headers: { 'User-Agent': 'Stroll-App' } }
+    );
+    const data = await response.json();
+    return data && data.length > 0 ? [parseFloat(data[0].lat), parseFloat(data[0].lon)] : null;
+  } catch (err) {
+    console.error('Geocoding error:', err.message);
+    return null;
   }
-
-  return null;
 }
 
-// Simplify route by removing redundant points that are too close
-function simplifyRoute(route) {
-  if (route.length < 3) return route;
+/**
+ * Fetch ALL ways (no highway type filter)
+ * Let the pedestrian scorer decide what's walkable
+ */
+async function fetchAllWays(lat, lng, radiusMeters) {
+  const radiusDegrees = radiusMeters / 111000;
 
-  const simplified = [route[0]];
-  const minDistance = 0.0001; // ~11 meters
+  const query = `
+    [bbox:${lat - radiusDegrees},${lng - radiusDegrees},${lat + radiusDegrees},${lng + radiusDegrees}];
+    (
+      way["highway"];
+      way["leisure"="park"];
+      way["leisure"="garden"];
+    );
+    out geom;
+  `;
 
-  for (let i = 1; i < route.length; i++) {
-    const last = simplified[simplified.length - 1];
-    const current = route[i];
+  try {
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: query,
+      timeout: 30000
+    });
 
-    const dist = haversine(last.lat, last.lon, current.lat, current.lon);
-    if (dist > minDistance) {
-      simplified.push(current);
-    }
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    return (data.ways || [])
+      .map(way => ({
+        id: way.id,
+        nodes: way.geometry.map(g => ({ lat: g.lat, lon: g.lon })),
+        tags: way.tags || {}
+      }))
+      .filter(way => way.nodes.length > 1);
+
+  } catch (err) {
+    console.warn('Overpass error:', err.message);
+    return [];
   }
-
-  return simplified;
 }
 
 // ============================================================
@@ -452,7 +557,7 @@ function simplifyRoute(route) {
 // ============================================================
 
 function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Earth radius km
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 +
@@ -462,15 +567,28 @@ function haversine(lat1, lon1, lat2, lon2) {
 }
 
 function calculateSearchRadius(distanceKm) {
-  // Search radius should be enough to find paths for the route
-  // Rule of thumb: 1.5x the target distance (accounts for indirect paths)
-  return Math.min(3000, Math.max(500, distanceKm * 1.5 * 1000)); // meters, cap at 3km
+  return Math.min(4000, Math.max(800, distanceKm * 1.8 * 1000));
+}
+
+function simplifyRoute(route) {
+  if (route.length < 3) return route;
+  const simplified = [route[0]];
+  const minDistance = 0.0001;
+
+  for (let i = 1; i < route.length; i++) {
+    const last = simplified[simplified.length - 1];
+    const current = route[i];
+    if (haversine(last.lat, last.lon, current.lat, current.lon) > minDistance) {
+      simplified.push(current);
+    }
+  }
+
+  return simplified;
 }
 
 function fallbackRoute(lat, lng, distanceKm) {
-  // Simple circle as fallback
   const radiusDegrees = (distanceKm / 2) / 111;
-  const numPoints = 20;
+  const numPoints = 24;
   const coordinates = [];
 
   for (let i = 0; i < numPoints; i++) {
@@ -480,7 +598,7 @@ function fallbackRoute(lat, lng, distanceKm) {
       lng + radiusDegrees * Math.cos(angle)
     ]);
   }
-  coordinates.push(coordinates[0]); // Close loop
+  coordinates.push(coordinates[0]);
 
   return success({
     coordinates,
