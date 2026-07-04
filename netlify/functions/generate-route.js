@@ -174,8 +174,8 @@ async function fetchAllWaysAggressive(lat, lng, radius, LOG) {
   const e = lng + deg;
   const w = lng - deg;
   
-  // Use JSON output
-  const query = `[bbox:${s},${w},${n},${e}];(way["highway"];way["leisure"="park"];way["leisure"="garden"];);out geom json;`;
+  // Use format that WORKS - returns XML with geometry
+  const query = `[bbox:${s},${w},${n},${e}];(way["highway"];way["leisure"="park"];way["leisure"="garden"];);out geom;`;
 
   try {
     const response = await fetch('https://overpass-api.de/api/interpreter', {
@@ -189,43 +189,66 @@ async function fetchAllWaysAggressive(lat, lng, radius, LOG) {
       return [];
     }
 
-    const data = await response.json();
-    
-    if (!data.ways || !Array.isArray(data.ways)) {
-      LOG.push(`NO_WAYS_ARRAY`);
-      return [];
-    }
+    const xml = await response.text();
+    LOG.push(`OVERPASS_SIZE: ${xml.length} bytes`);
 
-    LOG.push(`OVERPASS_WAYS: ${data.ways.length}`);
-
-    const ways = [];
-    for (const w of data.ways) {
-      if (!w.geometry || !Array.isArray(w.geometry) || w.geometry.length < 2) {
-        continue;
-      }
-
-      try {
-        const nodes = w.geometry.map(g => ({
-          lat: parseFloat(g.lat),
-          lon: parseFloat(g.lon)
-        })).filter(n => !isNaN(n.lat) && !isNaN(n.lon));
-
-        if (nodes.length < 2) continue;
-
-        ways.push({
-          id: w.id || Math.random(),
-          nodes,
-          tags: w.tags || {}
-        });
-      } catch (err) {
-        continue;
-      }
-    }
-
+    // Parse XML to extract ways
+    const ways = parseOverpassXML(xml);
     LOG.push(`PARSED_WAYS: ${ways.length}`);
+
     return ways;
   } catch (err) {
     LOG.push(`FETCH_ERROR: ${err.message}`);
+    return [];
+  }
+}
+
+// ============================================================
+// PARSE OVERPASS XML
+// ============================================================
+
+function parseOverpassXML(xml) {
+  const ways = [];
+  
+  try {
+    // Extract all <way> blocks
+    const wayPattern = /<way[^>]*id="(\d+)"[^>]*>([\s\S]*?)<\/way>/g;
+    let match;
+
+    while ((match = wayPattern.exec(xml)) !== null) {
+      const wayId = match[1];
+      const wayContent = match[2];
+
+      // Extract tags
+      const tags = {};
+      const tagPattern = /<tag k="([^"]*)" v="([^"]*)"/g;
+      let tagMatch;
+      while ((tagMatch = tagPattern.exec(wayContent)) !== null) {
+        tags[tagMatch[1]] = tagMatch[2];
+      }
+
+      // Extract nd (node) elements with lat/lon
+      const ndPattern = /<nd lat="([^"]*)" lon="([^"]*)"/g;
+      const nodes = [];
+      let ndMatch;
+      while ((ndMatch = ndPattern.exec(wayContent)) !== null) {
+        nodes.push({
+          lat: parseFloat(ndMatch[1]),
+          lon: parseFloat(ndMatch[2])
+        });
+      }
+
+      if (nodes.length >= 2) {
+        ways.push({
+          id: wayId,
+          nodes,
+          tags
+        });
+      }
+    }
+
+    return ways;
+  } catch (err) {
     return [];
   }
 }
