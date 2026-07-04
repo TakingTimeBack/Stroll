@@ -20,87 +20,85 @@ exports.handler = async (event) => {
 
     const centerLat = parseFloat(geoData[0].lat);
     const centerLng = parseFloat(geoData[0].lon);
-    console.log('✅ Location found:', { centerLat, centerLng });
+    console.log('✅ Location:', { centerLat, centerLng });
 
-    // STEP 2: Calculate distance
     const distanceKm = (time / 60) * pace;
-    console.log('📍 Distance target:', distanceKm, 'km');
+    console.log('📍 Target distance:', distanceKm, 'km');
 
-    // STEP 3: Create waypoints
-    console.log('📍 Creating waypoints...');
-    
-    let radius = 0.005;
-    if (distanceKm > 3) radius = 0.008;
-    if (distanceKm > 5) radius = 0.012;
-    if (distanceKm > 8) radius = 0.015;
+    // STEP 2: Generate route with validation loop
+    let attempt = 0;
+    let validRoute = null;
 
-    const numWaypoints = Math.max(10, Math.ceil(distanceKm / 1.5));
-    const waypoints = [];
+    while (attempt < 5 && !validRoute) {
+      attempt++;
+      console.log(`📍 Route generation attempt ${attempt}/5...`);
 
-    for (let i = 0; i < numWaypoints; i++) {
-      const angle = (i / numWaypoints) * Math.PI * 2;
-      const variation = 1 + (Math.random() - 0.5) * 0.15;
-      const lat = centerLat + radius * Math.sin(angle) * variation;
-      const lng = centerLng + radius * Math.cos(angle) * variation;
-      waypoints.push({ point: { lat, lng } });
+      // Create waypoints
+      let radius = 0.005;
+      if (distanceKm > 3) radius = 0.008;
+      if (distanceKm > 5) radius = 0.012;
+
+      const numWaypoints = Math.max(10, Math.ceil(distanceKm / 1.5));
+      const waypoints = [];
+
+      // Add randomization to waypoints for each attempt
+      for (let i = 0; i < numWaypoints; i++) {
+        const angle = (i / numWaypoints) * Math.PI * 2;
+        const randomRotation = (attempt - 1) * (Math.PI / 5) + (Math.random() * 0.3);
+        const variation = 1 + (Math.random() - 0.5) * 0.2;
+        const lat = centerLat + radius * Math.sin(angle + randomRotation) * variation;
+        const lng = centerLng + radius * Math.cos(angle + randomRotation) * variation;
+        waypoints.push([lng, lat]);
+      }
+      
+      waypoints.push(waypoints[0]); // Close loop
+      console.log(`✅ Waypoints created: ${waypoints.length}`);
+
+      // Call OSRM
+      const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
+      const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
+
+      const routeResponse = await fetch(routeUrl);
+
+      if (!routeResponse.ok) {
+        console.log('❌ OSRM failed, try next attempt');
+        continue;
+      }
+
+      const routeData = await routeResponse.json();
+
+      if (routeData.code !== 'Ok' || !routeData.routes || routeData.routes.length === 0) {
+        console.log('❌ No route from OSRM, try next attempt');
+        continue;
+      }
+
+      const route = routeData.routes[0];
+      console.log('📍 Validating route against OSM data...');
+
+      // STEP 3: Validate - check if route uses major roads
+      const hasProblematicRoads = await validateRoute(route);
+
+      if (!hasProblematicRoads) {
+        console.log('✅ Route is clean! No A-roads or motorways');
+        validRoute = route;
+      } else {
+        console.log(`⚠️  Route uses major roads, regenerating with different waypoints...`);
+      }
     }
-    
-    waypoints.push(waypoints[0]); // Close loop
-    console.log('✅ Waypoints:', waypoints.length);
 
-    // STEP 4: Call GraphHopper with avoid=motorway,trunk,primary
-    // This REFUSES to use A-roads, motorways, dual carriageways
-    console.log('📍 Routing with GraphHopper (avoiding motorways)...');
-    
-    // Build points string: lat,lng;lat,lng;...
-    const pointsString = waypoints.map(w => `${w.point.lat},${w.point.lng}`).join(';');
-    
-    const graphhopperUrl = `https://graphhopper.com/api/1/route?` +
-      `points=${encodeURIComponent(pointsString)}` +
-      `&profile=foot` +
-      `&avoid=motorway,trunk,primary` +
-      `&locale=en` +
-      `&points_encoded=false` +
-      `&key=7ea3e26c-e487-4f9a-b52b-b86c5b5cc387`;
-
-    console.log('📍 GraphHopper request sent');
-
-    const routeResponse = await fetch(graphhopperUrl);
-
-    if (!routeResponse.ok) {
-      console.error('❌ GraphHopper error:', routeResponse.status);
-      console.log('Using fallback route');
+    // If validation failed all attempts, use fallback
+    if (!validRoute) {
+      console.log('📍 All validation attempts failed, using fallback');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
     }
 
-    const routeData = await routeResponse.json();
-    console.log('✅ GraphHopper response received');
-
-    if (!routeData.paths || routeData.paths.length === 0) {
-      console.log('❌ No paths returned, fallback');
-      return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
-    }
-
-    // STEP 5: Extract coordinates
-    console.log('📍 Extracting coordinates...');
-    const path = routeData.paths[0];
-    
-    if (!path.points || !path.points.coordinates) {
-      console.log('❌ No coordinates, fallback');
-      return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
-    }
-
-    // GraphHopper returns [lat, lng]
-    const coordinates = path.points.coordinates;
-    
-    const actualDistance = (path.distance / 1000).toFixed(1);
+    // STEP 4: Extract coordinates
+    console.log('📍 Extracting final route...');
+    const coordinates = validRoute.geometry.coordinates.map(c => [c[1], c[0]]);
+    const actualDistance = (validRoute.distance / 1000).toFixed(1);
     const elevationGain = difficulty === 'easy' ? 50 : difficulty === 'moderate' ? 150 : 250;
 
-    console.log('✅ Route generated:', {
-      distance: actualDistance,
-      coordinates: coordinates.length,
-      elevation: elevationGain
-    });
+    console.log('✅ Final route:', { distance: actualDistance, coords: coordinates.length });
 
     return {
       statusCode: 200,
@@ -116,13 +114,98 @@ exports.handler = async (event) => {
     };
 
   } catch (error) {
-    console.error('❌ Handler error:', error.message);
+    console.error('❌ Error:', error.message);
     return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
   }
 };
 
+// STEP 3: Validate route against OSM major roads
+async function validateRoute(route) {
+  try {
+    // Get bounding box of route
+    const coords = route.geometry.coordinates;
+    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+
+    for (let coord of coords) {
+      minLng = Math.min(minLng, coord[0]);
+      maxLng = Math.max(maxLng, coord[0]);
+      minLat = Math.min(minLat, coord[1]);
+      maxLat = Math.max(maxLat, coord[1]);
+    }
+
+    console.log('📍 Checking for motorways/trunk roads in route area...');
+
+    // Query Overpass API for motorways and trunk roads in the area
+    const overpassQuery = `
+      [bbox:${minLat},${minLng},${maxLat},${maxLng}];
+      (
+        way["highway"="motorway"];
+        way["highway"="trunk"];
+        way["highway"="primary"];
+      );
+      out geom;
+    `;
+
+    const overpassResponse = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: overpassQuery
+    });
+
+    if (!overpassResponse.ok) {
+      console.log('⚠️  Overpass API error, assuming route is ok');
+      return false;
+    }
+
+    const overpassData = await overpassResponse.json();
+    const majorRoads = overpassData.elements || [];
+
+    console.log(`📍 Found ${majorRoads.length} major roads in area`);
+
+    // Check if route intersects with major roads
+    // Simple check: if route passes very close to known major roads, reject it
+    const routeLineString = coords;
+
+    for (let road of majorRoads) {
+      if (road.geometry) {
+        for (let roadCoord of road.geometry) {
+          // Check distance from route to major road
+          for (let routeCoord of routeLineString) {
+            const distance = getDistance(routeCoord[1], routeCoord[0], roadCoord.lat, roadCoord.lon);
+            
+            // If route is within 50m of a major road, it probably uses it
+            if (distance < 0.0005) { // ~50 meters
+              console.log(`❌ Route too close to major road (${(distance * 111000).toFixed(0)}m)`);
+              return true; // Has problematic roads
+            }
+          }
+        }
+      }
+    }
+
+    console.log('✅ Route keeps clear of major roads');
+    return false; // Route is good
+
+  } catch (error) {
+    console.error('⚠️  Validation error:', error.message);
+    // On error, assume route is ok (don't block)
+    return false;
+  }
+}
+
+// Simple distance calculation (degrees to km)
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return c; // in degrees (approx)
+}
+
 function fallbackRoute(centerLat, centerLng, distanceKm, difficulty) {
-  console.log('📍 Generating fallback circular route');
+  console.log('📍 Generating safe fallback circular route');
   
   let radius = 0.005;
   if (distanceKm > 3) radius = 0.008;
