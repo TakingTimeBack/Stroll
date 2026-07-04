@@ -1,16 +1,18 @@
 /**
- * STROLL OS DATA ROUTER
+ * STROLL OS DATA ROUTER - GITHUB RELEASE VERSION
  * 
- * Uses pre-cached OS Open Roads data (pedestrian-safe ways only)
+ * Uses OS Open Roads data hosted on GitHub Releases
+ * Fetches and decompresses regional data on demand
  * Builds local graph, routes via Dijkstra
  * Guaranteed to use only government-verified pedestrian infrastructure
  */
 
-const fs = require('fs');
 const zlib = require('zlib');
-const path = require('path');
 
-// Map postcode prefixes to regions (by first 1-2 letters)
+// Update this URL monthly when new data is released
+const DATA_BASE_URL = 'https://github.com/TakingTimeBack/Stroll/releases/download/os-roads-20260704/';
+
+// Map postcode prefixes to regions
 const postcodeToRegion = {
   // Southeast
   'GU': 'SE', 'RH': 'SE', 'TN': 'SE', 'CT': 'SE', 'ME': 'SE', 'DA': 'SE', 'BR': 'SE',
@@ -37,7 +39,7 @@ exports.handler = async (event) => {
   const LOG = [];
   
   try {
-    LOG.push('=== STROLL OS DATA ROUTER ===');
+    LOG.push('=== STROLL OS DATA ROUTER (GITHUB) ===');
     
     let body;
     try {
@@ -69,9 +71,9 @@ exports.handler = async (event) => {
     const region = extractRegionFromPostcode(location);
     LOG.push(`REGION: ${region}`);
 
-    // LOAD OS DATA FOR REGION
-    LOG.push('STEP: Loading OS Open Roads data');
-    const regionData = await loadRegionData(region);
+    // LOAD OS DATA FROM GITHUB
+    LOG.push('STEP: Fetching OS Open Roads data');
+    const regionData = await loadRegionDataFromGitHub(region);
     
     if (!regionData || !regionData.ways || regionData.ways.length === 0) {
       LOG.push('WARN: No pedestrian ways in region');
@@ -222,48 +224,50 @@ async function geocodeFinal(location) {
 }
 
 // ============================================================================
-// OS DATA LOADING
+// FETCH FROM GITHUB RELEASE
 // ============================================================================
 
-function extractRegionFromPostcode(location) {
-  const match = location.toUpperCase().match(/([A-Z]{1,2})/);
-  if (match) {
-    const prefix = match[1];
-    return postcodeToRegion[prefix] || 'SE';
-  }
-  return 'SE';
-}
-
-async function loadRegionData(region) {
-  return new Promise((resolve, reject) => {
-    // File path from Netlify function location (netlify/functions/generate-route.js)
-    // Goes up to root, then into data/os-roads/
-    const filePath = path.join(__dirname, '..', '..', 'data', 'os-roads', `${region}.json.gz`);
-    
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        console.error(`Could not load ${region} data: ${err.message}`);
-        console.error(`Tried path: ${filePath}`);
-        resolve(null);
-        return;
-      }
-
-      zlib.gunzip(data, (err, decompressed) => {
-        if (err) {
-          console.error(`Could not decompress ${region} data: ${err.message}`);
+async function loadRegionDataFromGitHub(region) {
+  return new Promise((resolve) => {
+    try {
+      const url = `${DATA_BASE_URL}${region}.json.gz`;
+      
+      fetch(url, { timeout: 30000 })
+        .then(res => {
+          if (!res.ok) {
+            console.error(`GitHub fetch failed: ${res.status}`);
+            resolve(null);
+            return;
+          }
+          return res.arrayBuffer();
+        })
+        .then(buffer => {
+          if (!buffer) return;
+          
+          zlib.gunzip(Buffer.from(buffer), (err, decompressed) => {
+            if (err) {
+              console.error(`Decompression failed: ${err.message}`);
+              resolve(null);
+              return;
+            }
+            
+            try {
+              const json = JSON.parse(decompressed.toString());
+              resolve(json);
+            } catch (parseErr) {
+              console.error(`Parse failed: ${parseErr.message}`);
+              resolve(null);
+            }
+          });
+        })
+        .catch(err => {
+          console.error(`GitHub fetch error: ${err.message}`);
           resolve(null);
-          return;
-        }
-
-        try {
-          const json = JSON.parse(decompressed.toString());
-          resolve(json);
-        } catch (parseErr) {
-          console.error(`Could not parse ${region} data: ${parseErr.message}`);
-          resolve(null);
-        }
-      });
-    });
+        });
+    } catch (err) {
+      console.error(`Load error: ${err.message}`);
+      resolve(null);
+    }
   });
 }
 
@@ -289,11 +293,9 @@ function buildGraph(ways, centerLat, centerLng) {
     return nodeMap.get(key);
   };
 
-  // Build from ways
   for (const way of ways) {
     const wayNodes = way.nodes.map(n => getOrCreateNode(n.lat, n.lng));
 
-    // Bidirectional edges
     for (let i = 0; i < wayNodes.length - 1; i++) {
       const from = wayNodes[i];
       const to = wayNodes[i + 1];
@@ -339,7 +341,6 @@ function dijkstraRoute(graph, start, end) {
 
   if (startDist > 0.01 || endDist > 0.01) return null;
 
-  // Dijkstra
   const dist = new Map();
   const prev = new Map();
   const unvisited = new Set();
@@ -462,6 +463,15 @@ function generateFallbackCircle(lat, lng, targetKm) {
 // ============================================================================
 // UTILS
 // ============================================================================
+
+function extractRegionFromPostcode(location) {
+  const match = location.toUpperCase().match(/([A-Z]{1,2})/);
+  if (match) {
+    const prefix = match[1];
+    return postcodeToRegion[prefix] || 'SE';
+  }
+  return 'SE';
+}
 
 function haversine(lat1, lng1, lat2, lng2) {
   const R = 6371;
