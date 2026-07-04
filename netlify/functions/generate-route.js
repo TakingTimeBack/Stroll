@@ -62,98 +62,139 @@ exports.handler = async (event) => {
       baseRadius = 0.0035; // ~390m for long walks
     }
 
-    // Adjust waypoint count - keep it lower for safety
-    const numWaypoints = Math.max(6, Math.min(12, Math.ceil(distanceKm * 1.5)));
+    // STEP 3: Create natural circular walk with pattern variation
+    console.log(`📍 Creating natural ${selectedPattern} walk...`);
+
     let waypoints = [];
+    waypoints.push([centerLng, centerLat]); // Start at center
 
-    console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints, radius ${(baseRadius * 111).toFixed(0)}m (distance: ${distanceKm.toFixed(1)}km)...`);
-
+    // Pattern determines exploration
+    let numExcursions;
     if (selectedPattern === 'circle') {
-      for (let i = 0; i < numWaypoints; i++) {
-        const angle = (i / numWaypoints) * Math.PI * 2;
-        const variation = 1 + (Math.random() - 0.5) * 0.05; // 5% variation only
-        const lat = centerLat + baseRadius * Math.sin(angle) * variation;
-        const lng = centerLng + baseRadius * Math.cos(angle) * variation;
-        waypoints.push([lng, lat]);
-      }
+      numExcursions = 1; // Go in one direction
     } else if (selectedPattern === 'square') {
-      const side = Math.ceil(numWaypoints / 4);
-      for (let s = 0; s < 4; s++) {
-        for (let i = 0; i < side; i++) {
-          if (waypoints.length >= numWaypoints) break;
-          const t = i / side;
-          let lat, lng;
-          
-          if (s === 0) {
-            lat = centerLat + baseRadius;
-            lng = centerLng - baseRadius + (t * 2 * baseRadius);
-          } else if (s === 1) {
-            lat = centerLat + baseRadius - (t * 2 * baseRadius);
-            lng = centerLng + baseRadius;
-          } else if (s === 2) {
-            lat = centerLat - baseRadius;
-            lng = centerLng + baseRadius - (t * 2 * baseRadius);
-          } else {
-            lat = centerLat - baseRadius + (t * 2 * baseRadius);
-            lng = centerLng - baseRadius;
-          }
-          
-          const variation = 1 + (Math.random() - 0.5) * 0.05; // 5% variation only
-          waypoints.push([lng * variation, lat * variation]);
-        }
-        if (waypoints.length >= numWaypoints) break;
-      }
+      numExcursions = 2; // Go in two opposite directions
     } else if (selectedPattern === 'spiral') {
-      for (let i = 0; i < numWaypoints; i++) {
-        const t = i / numWaypoints;
-        const angle = t * Math.PI * 4;
-        const r = baseRadius * t;
-        const variation = 1 + (Math.random() - 0.5) * 0.05; // 5% variation only
-        const lat = centerLat + r * Math.sin(angle) * variation;
-        const lng = centerLng + r * Math.cos(angle) * variation;
-        waypoints.push([lng, lat]);
-      }
+      numExcursions = 1; // Single direction with slightly larger radius
     } else if (selectedPattern === 'figure8') {
-      for (let i = 0; i < numWaypoints; i++) {
-        const t = (i / numWaypoints) * Math.PI * 2;
-        const r = baseRadius / 1.5;
-        const lobeRadius = Math.sin(t) * r;
-        const angle = t;
-        const variation = 1 + (Math.random() - 0.5) * 0.05; // 5% variation only
-        const lat = centerLat + lobeRadius * Math.sin(angle) * variation;
-        const lng = centerLng + lobeRadius * Math.cos(angle) * variation;
-        waypoints.push([lng, lat]);
-      }
+      numExcursions = 2; // Two loops
+    } else {
+      numExcursions = 1;
     }
 
+    // Create waypoints for exploration
+    for (let e = 0; e < numExcursions; e++) {
+      let angle = (e / Math.max(1, numExcursions - 1)) * Math.PI * 2;
+      
+      // Add randomness but not too much (no zigzags)
+      angle += (Math.random() - 0.5) * 0.3;
+      
+      // Distance varies by pattern
+      let distMultiplier = 0.9;
+      if (selectedPattern === 'spiral') distMultiplier = 0.95; // Go further
+      
+      const distance = baseRadius * (0.7 + distMultiplier * 0.2);
+      const lat = centerLat + distance * Math.sin(angle);
+      const lng = centerLng + distance * Math.cos(angle);
+      waypoints.push([lng, lat]);
+    }
+
+    waypoints.push([centerLng, centerLat]); // Return to center
+    console.log(`✅ Created ${selectedPattern} walk (${waypoints.length} waypoints)`);
+
     waypoints.push(waypoints[0]);
-    console.log(`✅ Waypoints created: ${waypoints.length}`);
+    console.log(`✅ Routing ${numWaypoints} waypoints with Valhalla (footpath-prioritized)...`);
 
-    // STEP 4: Generate route - single attempt, accept first success
-    console.log(`📍 Routing with ${numWaypoints} waypoints...`);
+    const waypointLocations = waypoints.map(p => ({
+      lat: p[1],
+      lon: p[0]
+    }));
 
-    const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
-    const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
+    const valhallRequest = {
+      locations: waypointLocations,
+      costing: 'pedestrian',
+      costing_options: {
+        pedestrian: {
+          use_roads: 0.1,
+          use_tracks: 0.8,
+          use_paths: 1.0,
+          mode: 'shorter'
+        }
+      },
+      filters: {
+        attributes: ['edge.id', 'edge.way_id'],
+        action: 'include'
+      },
+      shape_match: 'map_snap'
+    };
 
     let validRoute = null;
 
     try {
-      const routeResponse = await fetch(routeUrl, { timeout: 10000 });
+      const routeResponse = await fetch('https://valhalla1.openstreetmap.de/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(valhallRequest),
+        timeout: 15000
+      });
 
       if (routeResponse.ok) {
         const routeData = await routeResponse.json();
 
-        if (routeData.code === 'Ok' && routeData.routes && routeData.routes.length > 0) {
-          validRoute = routeData.routes[0];
-          console.log(`✅ Route generated: ${(validRoute.distance / 1000).toFixed(1)}km`);
+        if (routeData.trip && routeData.trip.legs && routeData.trip.legs.length > 0) {
+          // Convert Valhalla response to OSRM-like format
+          const legs = routeData.trip.legs;
+          let totalDistance = 0;
+          let coordinates = [];
+
+          for (let leg of legs) {
+            if (leg.shape) {
+              const shape = leg.shape;
+              for (let i = 0; i < shape.length; i += 2) {
+                coordinates.push([shape[i + 1], shape[i]]); // [lng, lat]
+              }
+            }
+            totalDistance += leg.distance || 0;
+          }
+
+          validRoute = {
+            distance: totalDistance,
+            geometry: { coordinates },
+            routes: [{ distance: totalDistance, geometry: { coordinates } }]
+          };
+
+          console.log(`✅ Valhalla route: ${(totalDistance / 1000).toFixed(1)}km`);
         }
       }
     } catch (err) {
-      console.log('❌ Routing failed:', err.message);
+      console.log('⚠️  Valhalla error:', err.message);
+    }
+
+    // Fallback to OSRM if Valhalla fails
+    if (!validRoute) {
+      console.log('📍 Valhalla failed, falling back to OSRM foot profile...');
+
+      const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
+      const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=true&geometries=geojson&overview=full`;
+
+      try {
+        const routeResponse = await fetch(routeUrl, { timeout: 10000 });
+
+        if (routeResponse.ok) {
+          const routeData = await routeResponse.json();
+
+          if (routeData.code === 'Ok' && routeData.routes && routeData.routes.length > 0) {
+            validRoute = routeData.routes[0];
+            console.log(`✅ OSRM route: ${(validRoute.distance / 1000).toFixed(1)}km`);
+          }
+        }
+      } catch (err) {
+        console.log('⚠️  OSRM fallback error:', err.message);
+      }
     }
 
     if (!validRoute) {
-      console.log('📍 Routing failed, using safe fallback');
+      console.log('📍 Both routing engines failed, using safe fallback');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty, selectedPattern);
     }
 
