@@ -210,7 +210,7 @@ async function fetchAllWays(lat, lng, radius) {
   const e = lng + deg;
   const w = lng - deg;
   
-  const query = `[bbox:${s},${w},${n},${e}];(way["highway"];way["leisure"="park"];way["leisure"="garden"];);out geom;`;
+  const query = `[bbox:${s},${w},${n},${e}];(way["highway"];way["leisure"="park"];way["leisure"="garden"];);out geom json;`;
 
   try {
     const response = await fetch('https://overpass-api.de/api/interpreter', {
