@@ -671,7 +671,6 @@
             }
 
             .toggle-group {
-                grid-template-columns: 1fr;
                 gap: 10px;
             }
 
@@ -961,6 +960,11 @@
                     </div>
                 </div>
 
+                <div style="background: rgba(107, 144, 128, 0.15); border: 1.5px solid var(--color-primary); border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.6;">
+                    <strong style="color: var(--color-primary); display: block; margin-bottom: 8px;">🇬🇧 Coverage: United Kingdom (England, Scotland, Wales, N. Ireland)</strong>
+                    <p style="margin: 0 0 10px 0; font-size: 12px;">Stroll currently works best in the UK, powered by official Ordnance Survey data. <button id="coverageInfoLink" style="background: none; border: none; color: var(--color-primary); text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; font-size: 12px;">See our roadmap →</button></p>
+                </div>
+
                 <div style="background: rgba(107, 144, 128, 0.1); border: 1px solid var(--color-primary); border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.6;">
                     <strong style="color: var(--color-primary); display: block; margin-bottom: 8px;">⚠️ Important Safety Notices:</strong>
                     <ul style="margin: 0; padding-left: 16px;">
@@ -987,6 +991,7 @@
                 <div class="tagline">Taking Time Back</div>
             </div>
             <div class="header-right">
+                <button class="icon-btn" id="devNotesBtn" title="Developer Notes">📝</button>
                 <button class="icon-btn" id="infoBtn" title="App Info">ℹ️</button>
                 <button class="icon-btn" id="statsBtn" title="Stats">📊</button>
                 <button class="icon-btn" id="settingsBtn" title="Settings">⚙️</button>
@@ -1050,6 +1055,9 @@
                 <!-- Preferences (Toggle Switches) -->
                 <div class="control-group">
                     <label class="control-label">✨ Route Preferences</label>
+                    <div style="font-size: 12px; color: var(--color-warning); background: rgba(255, 152, 0, 0.1); border: 1px solid rgba(255, 152, 0, 0.3); padding: 10px 12px; border-radius: 8px; margin-bottom: 12px;">
+                        <strong>⚙️ Under Development:</strong> These preferences are coming soon and don't affect routes yet.
+                    </div>
                     <div class="toggle-group">
                         <label class="toggle-item" id="prefScenicLabel">
                             <span class="toggle-label">🌳 Scenic (parks, nature)</span>
@@ -1109,6 +1117,9 @@
 
             <!-- CHALLENGES TAB -->
             <div id="challenges" class="tab-content">
+                <div style="font-size: 12px; color: var(--color-warning); background: rgba(255, 152, 0, 0.1); border: 1px solid rgba(255, 152, 0, 0.3); padding: 10px 12px; border-radius: 8px; margin-bottom: 14px;">
+                    <strong>⚙️ Under Development:</strong> Challenges and badges are coming soon.
+                </div>
                 <p style="font-size: 13px; color: var(--color-primary); margin-bottom: 14px; font-weight: 500;">
                     Complete weekly walking challenges for badges 🏅
                 </p>
@@ -1149,6 +1160,7 @@
             <div style="margin-bottom: 18px;">
                 <button class="btn-primary" id="pwaInstallBtn" style="display: none; background: var(--color-primary); color: white; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; margin: 0; margin-bottom: 12px;">📱 Install App (PWA)</button>
                 <button class="btn" id="pwaInfoBtn" style="width: 100%; padding: 12px; margin-bottom: 12px;">ℹ️ What is PWA?</button>
+                <button class="btn" id="coverageBtn" style="width: 100%; padding: 12px; margin-bottom: 12px;">🌍 Coverage & Roadmap</button>
             </div>
 
             <div style="margin-bottom: 20px; padding: 14px; background: var(--color-bg-alt); border-radius: 10px; border: 1px solid var(--color-border);">
@@ -1197,6 +1209,122 @@
             </div>
 
             <button id="closePwaBtn" class="btn-primary" style="width: 100%;">Close</button>
+        </div>
+    </div>
+
+    <!-- Coverage & Roadmap Modal -->
+    <div id="coverageModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1001;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 85vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700; color: var(--color-text);">🌍 Coverage & Roadmap</h2>
+            
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-primary); margin-bottom: 12px;">✅ Currently Available</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 10px 0;"><strong>🇬🇧 United Kingdom</strong></p>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--color-text-light); line-height: 1.8;">
+                        <li>England, Scotland, Wales, Northern Ireland</li>
+                        <li>Powered by official Ordnance Survey Open Roads data</li>
+                        <li>Routes guaranteed on pedestrian-safe infrastructure</li>
+                        <li>Data updated monthly for accuracy</li>
+                        <li>Full postcode coverage (all regions)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-primary); margin-bottom: 12px;">🔍 Investigating</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 12px;">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🇮🇪 Ireland</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0;">Evaluating data availability and licensing. No timeline confirmed.</p>
+                </div>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🇳🇿 New Zealand</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0;">LINZ data has strong pedestrian infrastructure. Evaluation in progress.</p>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-primary); margin-bottom: 12px;">📋 Possible Future Expansion</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0; line-height: 1.8;">
+                        <strong>Australia, Canada, EU countries</strong> - Data exists in these regions but requires significant integration work. Each region has different data structures and licensing requirements. <strong>No dates or timelines committed.</strong>
+                    </p>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px; padding: 14px; background: rgba(107, 144, 128, 0.1); border-radius: 10px; border: 1px solid var(--color-primary);">
+                <p style="font-size: 12px; color: var(--color-text); margin: 0; line-height: 1.6;">
+                    <strong>Why UK-first?</strong> The UK has the best publicly-available pedestrian data (Ordnance Survey). Other regions require different approaches. Stroll focuses on quality over speed - every region launched will have verified, reliable walking data.
+                </p>
+            </div>
+
+            <button id="closeCoverageBtn" class="btn-primary" style="width: 100%;">Close</button>
+        </div>
+    </div>
+
+    <!-- Developer Notes Modal -->
+    <div id="devNotesModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1002;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 85vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700; color: var(--color-text);">📝 Developer Notes</h2>
+            
+            <div style="margin-bottom: 20px; padding: 16px; background: rgba(124, 179, 66, 0.1); border-radius: 10px; border: 1px solid rgba(124, 179, 66, 0.3);">
+                <p style="font-size: 13px; color: var(--color-text); margin: 0; line-height: 1.6;">
+                    <strong>👋 Hello!</strong> Stroll is an indie project built by one developer. This is what's currently working and what's being built next.
+                </p>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-success); margin-bottom: 12px;">✅ Currently Live & Working</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: var(--color-text); line-height: 2;">
+                        <li>🚶 <strong>Circular route generation</strong> - Generates random walking routes</li>
+                        <li>⏱️ <strong>Time-based routing</strong> - Specify duration (15min to 2h)</li>
+                        <li>📍 <strong>Any UK location</strong> - Search by postcode, address, landmark</li>
+                        <li>🗺️ <strong>Route visualization</strong> - View on interactive map</li>
+                        <li>📱 <strong>PWA app</strong> - Install as app, works offline (cached)</li>
+                        <li>📥 <strong>Download routes</strong> - Export as GPX or KML</li>
+                        <li>🌙 <strong>Dark mode</strong> - Full dark/light theme support</li>
+                        <li>🔗 <strong>Share routes</strong> - Twitter, WhatsApp, Facebook, native share</li>
+                        <li>📱 <strong>Mobile responsive</strong> - Fully works on phone and tablet</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-warning); margin-bottom: 12px;">⚙️ Currently Under Development</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 12px;">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🛣️ Routing Logic (Priority #1)</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0; line-height: 1.6;">
+                        Currently using OSRM public routing API. Building custom routing engine with Ordnance Survey data to support:
+                    </p>
+                    <ul style="margin: 8px 0 0 20px; padding-left: 0; font-size: 12px; color: var(--color-text-light); line-height: 1.8;">
+                        <li>🌳 Scenic routes (via parks/nature areas)</li>
+                        <li>🤫 Quiet routes (avoiding busy roads)</li>
+                        <li>➡️ Flat routes (minimal elevation)</li>
+                        <li>🐕 Dog-friendly paths</li>
+                        <li>🛣️ Paved surface preference</li>
+                        <li>👧 Child-friendly routes</li>
+                        <li>🚼 Pushchair-accessible paths</li>
+                        <li>♿ Wheelchair-accessible infrastructure</li>
+                    </ul>
+                </div>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 12px;">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🏆 Challenges & Badges</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0;">Weekly walking challenges, streak tracking, and badge collection system.</p>
+                </div>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🔥 Community Heat Map</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0;">See popular routes in your area based on community activity.</p>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px; padding: 14px; background: rgba(255, 152, 0, 0.1); border-radius: 10px; border: 1px solid rgba(255, 152, 0, 0.3);">
+                <p style="font-size: 12px; color: var(--color-text); margin: 0; line-height: 1.6;">
+                    <strong>The big picture:</strong> Stroll is building a complete mapping infrastructure for walking routes. The routing preferences require building our own routing engine from official government data rather than relying on public APIs. This ensures accuracy and opens up custom preference matching.
+                </p>
+            </div>
+
+            <button id="closeDevNotesBtn" class="btn-primary" style="width: 100%;">Close</button>
         </div>
     </div>
 
@@ -1704,6 +1832,30 @@
             document.getElementById('pwaModal').style.display = 'none';
         });
 
+        // Coverage & Roadmap modal
+        document.getElementById('coverageBtn').addEventListener('click', () => {
+            document.getElementById('coverageModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeCoverageBtn').addEventListener('click', () => {
+            document.getElementById('coverageModal').style.display = 'none';
+        });
+
+        // Coverage link in welcome screen
+        document.getElementById('coverageInfoLink').addEventListener('click', () => {
+            document.getElementById('welcomeScreen').classList.add('hidden');
+            document.getElementById('coverageModal').style.display = 'flex';
+        });
+
+        // Developer Notes button
+        document.getElementById('devNotesBtn').addEventListener('click', () => {
+            document.getElementById('devNotesModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeDevNotesBtn').addEventListener('click', () => {
+            document.getElementById('devNotesModal').style.display = 'none';
+        });
+
         // Settings button
         document.getElementById('settingsBtn').addEventListener('click', () => {
             document.getElementById('settingsModal').style.display = 'flex';
@@ -1797,36 +1949,56 @@
 
         // Share buttons
         document.getElementById('shareTwitter').addEventListener('click', () => {
-            const text = `Just generated a ${state.currentRoute.distance}km walk with Stroll! Try it: strollapp.netlify.app`;
+            if (!state.currentRoute || !state.currentRoute.distance) {
+                alert('Generate a route first!');
+                return;
+            }
+            const text = `Just generated a ${state.currentRoute.distance}km walk with Stroll! 🚶‍♂️ Try it: strollapp.app`;
             window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
         });
 
         document.getElementById('shareWhatsApp').addEventListener('click', () => {
-            const text = `Check out this ${state.currentRoute.distance}km walk I generated with Stroll! strollapp.netlify.app`;
+            if (!state.currentRoute || !state.currentRoute.distance) {
+                alert('Generate a route first!');
+                return;
+            }
+            const text = `Check out this ${state.currentRoute.distance}km walk I generated with Stroll! 🗺️ strollapp.app`;
             window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
         });
 
         document.getElementById('shareFacebook').addEventListener('click', () => {
-            const text = `Check out this amazing ${state.currentRoute.distance}km walking route I just created with Stroll!`;
-            window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('strollapp.netlify.app')}&quote=${encodeURIComponent(text)}`, '_blank');
+            if (!state.currentRoute || !state.currentRoute.distance) {
+                alert('Generate a route first!');
+                return;
+            }
+            const text = `Check out this amazing ${state.currentRoute.distance}km walking route I just created with Stroll! 🚶‍♀️`;
+            window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://strollapp.app')}&quote=${encodeURIComponent(text)}`, '_blank');
         });
 
         document.getElementById('shareInstagram').addEventListener('click', () => {
-            const text = `Generated a ${state.currentRoute.distance}km walking route with Stroll! 🚶‍♀️🗺️ Check it out: strollapp.netlify.app`;
-            alert(`Instagram doesn't have a direct share link. Copy this:\n\n${text}`);
+            if (!state.currentRoute || !state.currentRoute.distance) {
+                alert('Generate a route first!');
+                return;
+            }
+            const text = `Generated a ${state.currentRoute.distance}km walking route with Stroll! 🚶‍♀️🗺️ Check it out: strollapp.app`;
+            alert(`Copy this to share on Instagram:\n\n${text}`);
             navigator.clipboard.writeText(text);
         });
 
         document.getElementById('shareNative').addEventListener('click', () => {
+            if (!state.currentRoute || !state.currentRoute.distance) {
+                alert('Generate a route first!');
+                return;
+            }
             if (navigator.share) {
                 navigator.share({
                     title: 'Stroll - Walking Route Generator',
                     text: `Check out this ${state.currentRoute.distance}km walking route I generated with Stroll!`,
-                    url: 'https://strollapp.netlify.app'
+                    url: 'https://strollapp.app'
                 }).catch(err => console.log('Share failed:', err));
             } else {
-                navigator.clipboard.writeText(`https://strollapp.netlify.app`);
-                alert('Native share not supported on this device. Link copied to clipboard!');
+                navigator.clipboard.writeText(`https://strollapp.app`);
+                alert('Link copied to clipboard!');
             }
         });
 
