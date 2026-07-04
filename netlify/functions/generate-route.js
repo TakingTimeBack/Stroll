@@ -1,17 +1,32 @@
 /**
- * STROLL PEDESTRIAN GRAPH ROUTER
+ * STROLL OS DATA ROUTER
  * 
- * Query OSM for ONLY pedestrian infrastructure
- * Build local walking network graph
- * Route using Dijkstra on pedestrian-only paths
- * No major roads, guaranteed walkable routes
+ * Uses pre-cached OS Open Roads data (pedestrian-safe ways only)
+ * Builds local graph, routes via Dijkstra
+ * Guaranteed to use only government-verified pedestrian infrastructure
  */
+
+const fs = require('fs');
+const zlib = require('zlib');
+const path = require('path');
+
+// Map postcode prefixes to regions
+const postcodeToRegion = {
+  'GU': 'SE', 'RH': 'SE', 'TN': 'SE', 'CT': 'SE', 'ME': 'SE', 'DA': 'SE', 'BR': 'SE',
+  'BA': 'SW', 'BH': 'SW', 'DT': 'SW', 'EX': 'SW', 'PL': 'SW', 'TQ': 'SW', 'TR': 'SW',
+  'WS': 'M', 'WV': 'M', 'DY': 'M', 'B': 'B', 'CV': 'M', 'WR': 'M', 'GL': 'M',
+  'CH': 'NW', 'CW': 'NW', 'L': 'NW', 'M': 'NW', 'PR': 'NW', 'SK': 'NW', 'WA': 'NW', 'CA': 'NW',
+  'BD': 'NE', 'DH': 'NE', 'DN': 'NE', 'HX': 'NE', 'LS': 'NE', 'NE': 'NE', 'SR': 'NE', 'TS': 'NE', 'YO': 'NE',
+  'CB': 'E', 'LN': 'E', 'NR': 'E', 'PE': 'E',
+  'CF': 'W', 'HR': 'W', 'LD': 'W', 'LL': 'W', 'NP': 'W', 'SA': 'W', 'SY': 'W',
+  'EC': 'EC', 'N': 'EC', 'NW': 'EC', 'SW': 'EC', 'W': 'EC'
+};
 
 exports.handler = async (event) => {
   const LOG = [];
   
   try {
-    LOG.push('=== STROLL PEDESTRIAN GRAPH ROUTER ===');
+    LOG.push('=== STROLL OS DATA ROUTER ===');
     
     let body;
     try {
@@ -38,42 +53,17 @@ exports.handler = async (event) => {
     const targetKm = (time / 60) * pace;
     LOG.push(`TARGET: ${targetKm.toFixed(2)}km`);
 
-    // FETCH PEDESTRIAN INFRASTRUCTURE ONLY
-    LOG.push('STEP: Fetching pedestrian ways');
-    const searchRadius = Math.max(0.8, Math.min(2, targetKm / 2)); // Adaptive radius
-    const pedestrianWays = await fetchPedestrianWays(lat, lng, searchRadius);
-    LOG.push(`PEDESTRIAN_WAYS: ${pedestrianWays.length}`);
+    // EXTRACT POSTCODE REGION
+    LOG.push('STEP: Determining OS region');
+    const region = extractRegionFromPostcode(location);
+    LOG.push(`REGION: ${region}`);
 
-    if (!pedestrianWays || pedestrianWays.length < 5) {
-      LOG.push('WARN: Few pedestrian ways, expanding search radius');
-      const expandedWays = await fetchPedestrianWays(lat, lng, searchRadius * 2);
-      pedestrianWays.push(...expandedWays);
-      LOG.push(`EXPANDED: ${pedestrianWays.length} total`);
-    }
-
-    if (pedestrianWays.length < 3) {
-      LOG.push('FAIL: Insufficient pedestrian infrastructure');
-      const fallback = generateFallbackCircle(lat, lng, targetKm);
-      return respond(200, {
-        coordinates: fallback.coords,
-        distance: fallback.dist,
-        elevation: Math.round(50 + fallback.dist / 2),
-        duration: time,
-        location,
-        pattern: 'fallback-circle',
-        success: true,
-        warning: 'Limited pedestrian data - using geometric route',
-        debug: LOG
-      });
-    }
-
-    // BUILD PEDESTRIAN GRAPH
-    LOG.push('STEP: Building pedestrian network graph');
-    const graph = buildPedestrianGraph(pedestrianWays, lat, lng);
-    LOG.push(`GRAPH: ${graph.nodes.length} intersections, ${graph.edges.length} segments`);
-
-    if (graph.nodes.length < 3) {
-      LOG.push('FAIL: Graph too small');
+    // LOAD OS DATA FOR REGION
+    LOG.push('STEP: Loading OS Open Roads data');
+    const regionData = await loadRegionData(region);
+    
+    if (!regionData || !regionData.ways || regionData.ways.length === 0) {
+      LOG.push('WARN: No pedestrian ways in region');
       const fallback = generateFallbackCircle(lat, lng, targetKm);
       return respond(200, {
         coordinates: fallback.coords,
@@ -88,44 +78,15 @@ exports.handler = async (event) => {
       });
     }
 
-    // GENERATE RANDOM WAYPOINTS IN PEDESTRIAN NETWORK
-    LOG.push('STEP: Generating waypoints in pedestrian network');
-    const waypoints = generateRandomWaypoints(lat, lng, Math.min(0.3, targetKm / 8), 4);
-    LOG.push(`WAYPOINTS: ${waypoints.length}`);
+    LOG.push(`WAYS: ${regionData.ways.length} pedestrian-safe ways`);
 
-    // ROUTE BETWEEN WAYPOINTS USING PEDESTRIAN GRAPH
-    LOG.push('STEP: Routing via pedestrian network');
-    const coordinates = [];
-    let lastPoint = { lat, lng };
+    // BUILD GRAPH
+    LOG.push('STEP: Building pedestrian graph');
+    const graph = buildGraph(regionData.ways, lat, lng);
+    LOG.push(`GRAPH: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
 
-    for (let i = 0; i < waypoints.length; i++) {
-      const wp = waypoints[i];
-      LOG.push(`  Segment ${i + 1}: Route to WP${i + 1}`);
-
-      const segment = dijkstraRoute(graph, lastPoint, wp);
-      if (segment && segment.length > 0) {
-        if (i === 0) {
-          coordinates.push(...segment);
-        } else {
-          coordinates.push(...segment.slice(1)); // Skip duplicate start
-        }
-        lastPoint = wp;
-        LOG.push(`    ✓ ${segment.length} points`);
-      } else {
-        LOG.push(`    ✗ no route found`);
-      }
-    }
-
-    // Return to start
-    LOG.push(`  Final: Return to center`);
-    const finalSeg = dijkstraRoute(graph, lastPoint, { lat, lng });
-    if (finalSeg && finalSeg.length > 0) {
-      coordinates.push(...finalSeg.slice(1));
-      LOG.push(`    ✓ ${finalSeg.length} points`);
-    }
-
-    if (coordinates.length < 2) {
-      LOG.push('FAIL: No valid routes through graph');
+    if (graph.nodes.length < 3) {
+      LOG.push('WARN: Graph too small, fallback');
       const fallback = generateFallbackCircle(lat, lng, targetKm);
       return respond(200, {
         coordinates: fallback.coords,
@@ -135,18 +96,70 @@ exports.handler = async (event) => {
         location,
         pattern: 'fallback-circle',
         success: true,
-        warning: 'Could not route through pedestrian network',
+        warning: 'Insufficient connected paths',
         debug: LOG
       });
     }
 
-    // Calculate distance
-    let totalDist = 0;
-    for (let i = 0; i < coordinates.length - 1; i++) {
-      totalDist += haversine(coordinates[i].lat, coordinates[i].lng, coordinates[i + 1].lat, coordinates[i + 1].lng);
+    // GENERATE RANDOM WAYPOINTS
+    LOG.push('STEP: Generating random waypoints');
+    const radius = Math.min(0.3, targetKm / 10);
+    const waypoints = generateRandomWaypoints(lat, lng, radius, 4);
+    LOG.push(`WAYPOINTS: ${waypoints.length}`);
+
+    // ROUTE BETWEEN WAYPOINTS
+    LOG.push('STEP: Routing via pedestrian network');
+    const coordinates = [];
+    let lastPoint = { lat, lng };
+
+    for (let i = 0; i < waypoints.length; i++) {
+      const wp = waypoints[i];
+      const segment = dijkstraRoute(graph, lastPoint, wp);
+      
+      if (segment && segment.length > 0) {
+        if (i === 0) {
+          coordinates.push(...segment);
+        } else {
+          coordinates.push(...segment.slice(1));
+        }
+        lastPoint = wp;
+        LOG.push(`  ✓ Segment ${i + 1}: ${segment.length} points`);
+      } else {
+        LOG.push(`  ✗ Segment ${i + 1}: no route`);
+      }
     }
 
-    LOG.push(`COMPLETE: ${coordinates.length} points, ${totalDist.toFixed(2)}km`);
+    // RETURN TO START
+    const finalSeg = dijkstraRoute(graph, lastPoint, { lat, lng });
+    if (finalSeg && finalSeg.length > 0) {
+      coordinates.push(...finalSeg.slice(1));
+      LOG.push(`  ✓ Return: ${finalSeg.length} points`);
+    }
+
+    if (coordinates.length < 2) {
+      LOG.push('FAIL: No valid route');
+      const fallback = generateFallbackCircle(lat, lng, targetKm);
+      return respond(200, {
+        coordinates: fallback.coords,
+        distance: fallback.dist,
+        elevation: Math.round(50 + fallback.dist / 2),
+        duration: time,
+        location,
+        pattern: 'fallback-circle',
+        success: true,
+        warning: 'Could not route',
+        debug: LOG
+      });
+    }
+
+    // CALCULATE DISTANCE
+    let totalDist = 0;
+    for (let i = 0; i < coordinates.length - 1; i++) {
+      totalDist += haversine(coordinates[i].lat, coordinates[i].lng, 
+                            coordinates[i + 1].lat, coordinates[i + 1].lng);
+    }
+
+    LOG.push(`SUCCESS: ${coordinates.length} points, ${totalDist.toFixed(2)}km`);
 
     return respond(200, {
       coordinates: coordinates.map(c => [c.lat, c.lng]),
@@ -154,7 +167,8 @@ exports.handler = async (event) => {
       elevation: Math.round(50 + totalDist / 2),
       duration: time,
       location,
-      pattern: 'pedestrian-graph',
+      pattern: 'os-pedestrian',
+      source: 'Ordnance Survey Open Roads',
       success: true,
       debug: LOG
     });
@@ -197,93 +211,53 @@ async function geocodeFinal(location) {
 }
 
 // ============================================================================
-// FETCH PEDESTRIAN WAYS ONLY
+// OS DATA LOADING
 // ============================================================================
 
-async function fetchPedestrianWays(lat, lng, radiusKm) {
-  try {
-    const deg = radiusKm / 111;
-    
-    // Query ONLY pedestrian-friendly ways
-    const query = `[bbox:${lat - deg},${lng - deg},${lat + deg},${lng + deg}];
-(
-  way["highway"="footway"];
-  way["highway"="pedestrian"];
-  way["highway"="path"];
-  way["highway"="track"];
-  way["highway"="residential"]["sidewalk"="both"];
-  way["highway"="residential"]["sidewalk"="left"];
-  way["highway"="residential"]["sidewalk"="right"];
-  way["highway"="unclassified"]["sidewalk"~"left|right|both"];
-  way["highway"="tertiary"]["sidewalk"~"left|right|both"];
-  way["leisure"="park"];
-  way["leisure"="garden"];
-);
-out geom;`;
-
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: query,
-      timeout: 20000
-    });
-
-    if (!response.ok) {
-      return [];
-    }
-
-    const xml = await response.text();
-    const ways = parseOverpassXML(xml);
-
-    return ways;
-  } catch (err) {
-    return [];
+function extractRegionFromPostcode(location) {
+  const match = location.toUpperCase().match(/([A-Z]{1,2})/);
+  if (match) {
+    const prefix = match[1];
+    return postcodeToRegion[prefix] || 'SE';
   }
+  return 'SE';
+}
+
+async function loadRegionData(region) {
+  return new Promise((resolve, reject) => {
+    const filePath = path.join(__dirname, '..', 'data', 'os-roads', `${region}.json.gz`);
+    
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        console.error(`Could not load ${region} data:`, err.message);
+        resolve(null);
+        return;
+      }
+
+      zlib.gunzip(data, (err, decompressed) => {
+        if (err) {
+          console.error(`Could not decompress ${region} data:`, err.message);
+          resolve(null);
+          return;
+        }
+
+        try {
+          const json = JSON.parse(decompressed.toString());
+          resolve(json);
+        } catch (parseErr) {
+          console.error(`Could not parse ${region} data:`, parseErr.message);
+          resolve(null);
+        }
+      });
+    });
+  });
 }
 
 // ============================================================================
-// PARSE OVERPASS XML
+// GRAPH BUILDING
 // ============================================================================
 
-function parseOverpassXML(xml) {
-  const ways = [];
-  
-  try {
-    const wayPattern = /<way[^>]*id="(\d+)"[^>]*>([\s\S]*?)<\/way>/g;
-    let match;
-
-    while ((match = wayPattern.exec(xml)) !== null) {
-      const wayId = match[1];
-      const wayContent = match[2];
-
-      // Extract nodes with coordinates
-      const ndPattern = /<nd lat="([^"]*)" lon="([^"]*)"/g;
-      const nodes = [];
-      let ndMatch;
-
-      while ((ndMatch = ndPattern.exec(wayContent)) !== null) {
-        nodes.push({
-          lat: parseFloat(ndMatch[1]),
-          lng: parseFloat(ndMatch[2])
-        });
-      }
-
-      if (nodes.length >= 2) {
-        ways.push({
-          id: wayId,
-          nodes
-        });
-      }
-    }
-  } catch (err) {}
-
-  return ways;
-}
-
-// ============================================================================
-// BUILD PEDESTRIAN GRAPH
-// ============================================================================
-
-function buildPedestrianGraph(ways, centerLat, centerLng) {
+function buildGraph(ways, centerLat, centerLng) {
   const nodeMap = new Map();
   const edges = [];
   let nodeId = 0;
@@ -305,17 +279,15 @@ function buildPedestrianGraph(ways, centerLat, centerLng) {
   for (const way of ways) {
     const wayNodes = way.nodes.map(n => getOrCreateNode(n.lat, n.lng));
 
-    // Create bidirectional edges
+    // Bidirectional edges
     for (let i = 0; i < wayNodes.length - 1; i++) {
       const from = wayNodes[i];
       const to = wayNodes[i + 1];
       const dist = haversine(from.lat, from.lng, to.lat, to.lng);
 
-      // Forward
       edges.push({ from: from.id, to: to.id, dist });
       from.edges.push(edges.length - 1);
 
-      // Reverse
       edges.push({ from: to.id, to: from.id, dist });
       to.edges.push(edges.length - 1);
     }
@@ -332,7 +304,6 @@ function buildPedestrianGraph(ways, centerLat, centerLng) {
 function dijkstraRoute(graph, start, end) {
   const { nodes, edges } = graph;
   
-  // Find closest nodes to start/end
   let startNode = nodes[0];
   let endNode = nodes[0];
   let startDist = Infinity;
@@ -352,12 +323,9 @@ function dijkstraRoute(graph, start, end) {
     }
   }
 
-  if (startDist > 0.01 || endDist > 0.01) {
-    // Points too far from graph
-    return null;
-  }
+  if (startDist > 0.01 || endDist > 0.01) return null;
 
-  // Dijkstra's algorithm
+  // Dijkstra
   const dist = new Map();
   const prev = new Map();
   const unvisited = new Set();
@@ -387,7 +355,6 @@ function dijkstraRoute(graph, start, end) {
     unvisited.delete(current);
     const currentNode = nodeById[current];
 
-    // Check edges from current
     for (const edgeIdx of currentNode.edges) {
       const edge = edges[edgeIdx];
       const neighbor = edge.to;
@@ -402,7 +369,6 @@ function dijkstraRoute(graph, start, end) {
     }
   }
 
-  // Reconstruct path
   if (!prev.has(endNode.id) && endNode.id !== startNode.id) {
     return null;
   }
@@ -420,7 +386,7 @@ function dijkstraRoute(graph, start, end) {
 }
 
 // ============================================================================
-// RANDOM WAYPOINTS
+// WAYPOINTS
 // ============================================================================
 
 function generateRandomWaypoints(lat, lng, radius, count) {

@@ -1,0 +1,2115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#6b9080">
+    <meta name="description" content="Stroll - Generate circular walking routes. Free, indie-built, help a developer.">
+    <title>Stroll - Walking Routes Made Simple</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%236b9080' width='180' height='180'/><text x='50%' y='50%' font-size='100' font-weight='bold' fill='white' text-anchor='middle' dy='.3em'>//</text></svg>">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+        :root {
+            --color-primary: #6b9080;
+            --color-primary-dark: #4a5f55;
+            --color-primary-light: #8cb896;
+            --color-accent: #FC5200;
+            --color-bg: #ffffff;
+            --color-bg-alt: #f8f9f8;
+            --color-text: #2d3436;
+            --color-text-light: #636e72;
+            --color-border: #e8eae6;
+            --color-success: #4caf50;
+            --color-warning: #ff9800;
+        }
+
+        [data-theme="dark"] {
+            --color-bg: #1a1a1a;
+            --color-bg-alt: #242424;
+            --color-text: #ecf0f1;
+            --color-text-light: #bdc3c7;
+            --color-border: #343434;
+            --color-primary: #7ecb9e;
+            --color-primary-dark: #5fa87c;
+            --color-primary-light: #9dd9b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: var(--color-bg);
+            color: var(--color-text);
+            -webkit-font-smoothing: antialiased;
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        /* Heading Colors */
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--color-text);
+        }
+
+        /* Input Fields - Dark Mode Safe */
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        textarea,
+        select {
+            background: var(--color-bg-alt) !important;
+            color: var(--color-text) !important;
+            border-color: var(--color-border) !important;
+            caret-color: var(--color-primary) !important;
+        }
+
+        input[type="text"]::placeholder,
+        input[type="number"]::placeholder,
+        input[type="email"]::placeholder,
+        textarea::placeholder {
+            color: var(--color-text-light) !important;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="email"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--color-primary) !important;
+            box-shadow: 0 0 0 2px rgba(107, 144, 128, 0.2);
+        }
+
+        html, body, #app {
+            width: 100%;
+            height: 100%;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: var(--color-bg);
+        }
+
+        /* Welcome Screen */
+        .welcome-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        .welcome-screen.hidden {
+            display: none !important;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .welcome-content {
+            background: var(--color-bg);
+            border-radius: 20px;
+            padding: 48px 28px;
+            max-width: 420px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+        }
+
+        .welcome-logo {
+            margin-bottom: 24px;
+        }
+
+        .welcome-content h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--color-text);
+            margin-bottom: 8px;
+        }
+
+        .welcome-tagline {
+            font-size: 14px;
+            color: var(--color-primary);
+            font-weight: 600;
+            letter-spacing: 1px;
+            margin-bottom: 24px;
+            text-transform: uppercase;
+        }
+
+        .welcome-description {
+            font-size: 15px;
+            color: var(--color-text-light);
+            line-height: 1.7;
+            margin-bottom: 32px;
+        }
+
+        .welcome-features {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 32px;
+        }
+
+        .welcome-feature {
+            background: var(--color-bg-alt);
+            padding: 16px;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feature-icon {
+            font-size: 32px;
+        }
+
+        .feature-text {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--color-text);
+        }
+
+        .welcome-button {
+            background: var(--color-primary);
+            color: white;
+            padding: 16px 32px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+        }
+
+        .welcome-button:active {
+            background: var(--color-primary-dark);
+            transform: scale(0.98);
+        }
+
+        .welcome-skip {
+            background: none;
+            border: 2px solid var(--color-border);
+            color: var(--color-text);
+            padding: 14px 32px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .welcome-skip:active {
+            background: var(--color-bg-alt);
+        }
+
+        /* Header */
+        header {
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-bg);
+            padding: 14px 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .header-logo {
+            height: 36px;
+            width: auto;
+            margin-bottom: 2px;
+        }
+
+        .tagline {
+            font-size: 10px;
+            color: var(--color-primary);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .header-right {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 8px;
+            color: var(--color-primary);
+            transition: transform 0.2s;
+        }
+
+        .icon-btn:active {
+            transform: scale(0.92);
+        }
+
+        /* Main */
+        main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group {
+            margin-bottom: 24px;
+        }
+
+        .control-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--color-primary);
+            margin-bottom: 12px;
+            letter-spacing: 0.8px;
+        }
+
+        .button-group {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn, .btn-option {
+            padding: 11px 14px;
+            border: 1.5px solid var(--color-border);
+            border-radius: 8px;
+            background: var(--color-bg-alt);
+            color: var(--color-text);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:active, .btn-option:active {
+            transform: scale(0.95);
+        }
+
+        .btn-option.active {
+            background: var(--color-primary);
+            color: white;
+            border-color: var(--color-primary);
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: white;
+            padding: 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            margin: 20px 0;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:active {
+            background: var(--color-primary-dark);
+            transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: var(--color-accent);
+            color: white;
+            padding: 13px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .error-box {
+            background: rgba(198, 40, 40, 0.1);
+            color: #ff6b6b;
+            padding: 13px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            font-size: 13px;
+            border-left: 4px solid #ff6b6b;
+        }
+
+        .error-box.hidden {
+            display: none;
+        }
+
+        /* Toggle Switch */
+        .toggle-group {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .toggle-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            background: var(--color-bg-alt);
+            border-radius: 10px;
+            border: 1px solid var(--color-border);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .toggle-item:active {
+            background: var(--color-border);
+        }
+
+        .toggle-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--color-text);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: var(--color-border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: var(--color-primary);
+        }
+
+        .toggle-switch::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            top: 2px;
+            left: 2px;
+            transition: left 0.3s;
+        }
+
+        .toggle-switch.active::before {
+            left: 20px;
+        }
+
+        .route-info {
+            background: var(--color-bg-alt);
+            border: 1px solid var(--color-border);
+            border-radius: 12px;
+            padding: 18px;
+            margin-top: 18px;
+        }
+
+        .info-block {
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .info-block:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .info-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--color-primary);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .info-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--color-text);
+        }
+
+        .share-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .share-btn {
+            padding: 11px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1.5px solid var(--color-border);
+            background: var(--color-bg-alt);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .share-btn:active {
+            background: var(--color-border);
+            transform: scale(0.95);
+        }
+
+        .dev-promo {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
+            color: white;
+            padding: 18px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .dev-promo h3 {
+            font-size: 15px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .dev-promo p {
+            font-size: 13px;
+            opacity: 0.95;
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
+
+        .dev-promo-btn {
+            background: white;
+            color: var(--color-primary);
+            padding: 11px 18px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        #map {
+            width: 100%;
+            height: 320px;
+            border-radius: 12px;
+            margin: 18px 0;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--color-primary);
+            color: white;
+            padding: 13px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 1000;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .tab-nav {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0;
+            border-bottom: 2px solid var(--color-border);
+            margin-bottom: 18px;
+        }
+
+        .tab-btn {
+            padding: 13px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--color-text-light);
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            border-bottom-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .rating-input {
+            font-size: 26px;
+            letter-spacing: 10px;
+            cursor: pointer;
+        }
+
+        .rating-input span {
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .rating-input span:hover {
+            transform: scale(1.2);
+        }
+
+        .challenge-card {
+            background: var(--color-bg-alt);
+            padding: 14px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            border: 1px solid var(--color-border);
+        }
+
+        .challenge-title {
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--color-text);
+        }
+
+        .challenge-progress {
+            width: 100%;
+            height: 7px;
+            background: var(--color-border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .challenge-progress-bar {
+            height: 100%;
+            background: var(--color-primary);
+            transition: width 0.3s;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 0;
+            }
+
+            header {
+                padding: 14px 16px;
+                gap: 8px;
+            }
+
+            .header-logo {
+                height: 32px;
+            }
+
+            .tagline {
+                font-size: 12px;
+            }
+
+            main {
+                padding: 12px;
+            }
+
+            .control-group {
+                margin-bottom: 18px;
+            }
+
+            .control-label {
+                font-size: 11px;
+                margin-bottom: 10px;
+            }
+
+            .button-group {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+
+            .btn, .btn-option {
+                padding: 10px 12px;
+                font-size: 12px;
+            }
+
+            .btn-primary {
+                padding: 12px 16px;
+                font-size: 13px;
+            }
+
+            .toggle-group {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .toggle-item {
+                padding: 11px 12px;
+            }
+
+            .toggle-label {
+                font-size: 12px;
+            }
+
+            .share-buttons {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .download-buttons {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .welcome-content {
+                padding: 32px 20px;
+                max-width: 100%;
+                border-radius: 16px;
+            }
+
+            .welcome-content h1 {
+                font-size: 28px;
+                margin-bottom: 8px;
+            }
+
+            .welcome-content p {
+                font-size: 13px;
+            }
+
+            .welcome-features {
+                gap: 16px;
+                margin: 20px 0;
+            }
+
+            .feature-item {
+                gap: 10px;
+            }
+
+            .feature-item .emoji {
+                font-size: 28px;
+            }
+
+            .feature-item span {
+                font-size: 12px;
+            }
+
+            .tab-nav {
+                gap: 4px;
+                padding: 8px;
+            }
+
+            .tab-btn {
+                padding: 10px 12px;
+                font-size: 12px;
+            }
+
+            .icon-btn {
+                width: 36px;
+                height: 36px;
+                font-size: 18px;
+            }
+
+            .modal {
+                padding: 0;
+            }
+
+            .modal > div {
+                max-height: 90vh;
+                max-width: 95vw;
+                border-radius: 16px;
+            }
+
+            input, select {
+                padding: 12px;
+                font-size: 16px;
+            }
+
+            .gps-button {
+                padding: 10px;
+            }
+
+            #modalMap {
+                height: 250px;
+            }
+
+            .route-info {
+                padding: 12px;
+                margin: 12px 0;
+            }
+
+            .route-info h3 {
+                font-size: 13px;
+                margin-bottom: 6px;
+            }
+
+            .route-info p {
+                font-size: 12px;
+                margin-bottom: 4px;
+            }
+
+            .route-info .info-value {
+                font-size: 14px;
+                font-weight: 600;
+            }
+
+            .stars {
+                font-size: 24px;
+                gap: 4px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            header {
+                padding: 12px 12px;
+            }
+
+            .header-left {
+                gap: 6px;
+            }
+
+            .header-logo {
+                height: 28px;
+            }
+
+            .tagline {
+                font-size: 11px;
+            }
+
+            .header-right {
+                gap: 6px;
+            }
+
+            .icon-btn {
+                width: 32px;
+                height: 32px;
+                font-size: 16px;
+            }
+
+            main {
+                padding: 10px;
+            }
+
+            .button-group {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 6px;
+            }
+
+            .btn {
+                padding: 9px 10px;
+                font-size: 11px;
+            }
+
+            .btn-primary {
+                padding: 11px 14px;
+                font-size: 12px;
+            }
+
+            .toggle-item {
+                padding: 10px;
+                gap: 8px;
+            }
+
+            .toggle-label {
+                font-size: 11px;
+            }
+
+            .toggle-switch {
+                width: 40px;
+                height: 22px;
+            }
+
+            .toggle-switch::before {
+                width: 18px;
+                height: 18px;
+            }
+
+            .toggle-switch.active::before {
+                left: 18px;
+            }
+
+            .tab-nav {
+                gap: 2px;
+                padding: 6px;
+            }
+
+            .tab-btn {
+                padding: 8px 10px;
+                font-size: 11px;
+            }
+
+            .share-buttons {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            .download-buttons {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            #modalMap {
+                height: 200px;
+            }
+
+            .route-info {
+                padding: 10px;
+                margin: 10px 0;
+            }
+
+            input, select {
+                padding: 11px;
+                font-size: 16px;
+            }
+
+            .control-label {
+                font-size: 10px;
+            }
+
+            .welcome-content {
+                padding: 24px 16px;
+            }
+
+            .welcome-content h1 {
+                font-size: 24px;
+            }
+
+            .welcome-content p {
+                font-size: 12px;
+            }
+
+            .welcome-features {
+                gap: 12px;
+                margin: 16px 0;
+            }
+
+            .feature-item .emoji {
+                font-size: 24px;
+            }
+
+            .stars {
+                font-size: 20px;
+                gap: 3px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="container">
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="welcome-screen hidden">
+            <div class="welcome-content">
+                <div class="welcome-logo">
+                    <div style="font-size: 64px; font-weight: bold; color: var(--color-primary);">//</div>
+                </div>
+                
+                <h1>Welcome to Stroll</h1>
+                <p class="welcome-tagline">Taking Time Back</p>
+                
+                <div class="welcome-description">
+                    <p>Generate perfect walking routes instantly.</p>
+                    <p style="margin-top: 12px;">No planning needed. Just tell us where you are, how much time you have, and go.</p>
+                </div>
+
+                <div class="welcome-features">
+                    <div class="welcome-feature">
+                        <div class="feature-icon">👟</div>
+                        <div class="feature-text">Casual walks</div>
+                    </div>
+                    <div class="welcome-feature">
+                        <div class="feature-icon">👧</div>
+                        <div class="feature-text">Kid-friendly</div>
+                    </div>
+                    <div class="welcome-feature">
+                        <div class="feature-icon">🚼</div>
+                        <div class="feature-text">Pushchair-friendly</div>
+                    </div>
+                    <div class="welcome-feature">
+                        <div class="feature-icon">♿</div>
+                        <div class="feature-text">Accessible</div>
+                    </div>
+                </div>
+
+                <div style="background: rgba(107, 144, 128, 0.15); border: 1.5px solid var(--color-primary); border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.6;">
+                    <strong style="color: var(--color-primary); display: block; margin-bottom: 8px;">🇬🇧 Coverage: United Kingdom (England, Scotland, Wales, N. Ireland)</strong>
+                    <p style="margin: 0 0 10px 0; font-size: 12px;">Stroll currently works best in the UK, powered by official Ordnance Survey data. <button id="coverageInfoLink" style="background: none; border: none; color: var(--color-primary); text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; font-size: 12px;">See our roadmap →</button></p>
+                </div>
+
+                <div style="background: rgba(107, 144, 128, 0.1); border: 1px solid var(--color-primary); border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.6;">
+                    <strong style="color: var(--color-primary); display: block; margin-bottom: 8px;">⚠️ Important Safety Notices:</strong>
+                    <ul style="margin: 0; padding-left: 16px;">
+                        <li>Our algorithm works to identify safe pedestrian routes, but <strong>can make mistakes</strong></li>
+                        <li><strong>Always check the map</strong> before walking - verify streets are safe</li>
+                        <li>Routes may include roads, pavements, or footpaths - <strong>use your judgment</strong></li>
+                        <li>Street conditions change - check for roadworks, hazards, flooding, etc.</li>
+                        <li>You are <strong>fully responsible for your own safety</strong></li>
+                        <li>Follow all local traffic laws and watch for traffic</li>
+                        <li>Not suitable for children without adult supervision</li>
+                        <li>Don't use while driving or operating machinery</li>
+                    </ul>
+                </div>
+
+                <button class="welcome-button" id="welcomeStartBtn">Get Started</button>
+                <button class="welcome-skip" id="welcomeSkipBtn">Skip</button>
+            </div>
+        </div>
+
+        <!-- Header -->
+        <header>
+            <div class="header-left">
+                <img id="headerLogo" src="logos/Original_on_Transparent.png" alt="Stroll" class="header-logo" onerror="this.style.display='none'">
+                <div class="tagline">Taking Time Back</div>
+            </div>
+            <div class="header-right">
+                <button class="icon-btn" id="infoBtn" title="App Info">ℹ️</button>
+                <button class="icon-btn" id="statsBtn" title="Stats">📊</button>
+                <button class="icon-btn" id="settingsBtn" title="Settings">⚙️</button>
+                <button class="icon-btn" id="darkModeBtn" title="Dark Mode">🌙</button>
+            </div>
+        </header>
+
+        <!-- Tagline -->
+        <div style="text-align: center; padding: 12px 20px; background: var(--color-bg); border-bottom: 1px solid var(--color-border);">
+            <p style="margin: 0; font-size: 13px; color: var(--color-text-light); font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase;">Skip the planning. Start walking.</p>
+        </div>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Tab Navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" data-tab="generate">Generate</button>
+                <button class="tab-btn" data-tab="history">History ❤️</button>
+                <button class="tab-btn" data-tab="challenges">Challenges 🏆</button>
+                <button class="tab-btn" data-tab="popular">Popular 🔥</button>
+            </div>
+
+            <!-- GENERATE TAB -->
+            <div id="generate" class="tab-content active">
+                <div id="errorBox" class="error-box hidden"></div>
+
+                <!-- Location -->
+                <div class="control-group">
+                    <label class="control-label">📍 Where Are You?</label>
+                    <input type="text" id="locationInput" placeholder="Enter location, street name, or neighborhood" 
+                           style="width: 100%; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt); color: var(--color-text);">
+                    <p style="font-size: 12px; color: var(--color-text-light); margin-top: 8px; margin-bottom: 0;">Examples: "Main Street", "Trafalgar Square", "Soho, London"</p>
+                    <button class="btn" id="gpsBtn" style="width: 100%; margin-top: 10px;">📍 Use My Location</button>
+                </div>
+
+                <!-- Time -->
+                <div class="control-group">
+                    <label class="control-label">⏱️ Time Available</label>
+                    <div class="button-group" id="timeButtons" style="grid-template-columns: repeat(7, 1fr); gap: 6px;">
+                        <button class="btn btn-option active" data-time="15" style="padding: 9px 8px; font-size: 11px;">15m</button>
+                        <button class="btn btn-option" data-time="20" style="padding: 9px 8px; font-size: 11px;">20m</button>
+                        <button class="btn btn-option" data-time="30" style="padding: 9px 8px; font-size: 11px;">30m</button>
+                        <button class="btn btn-option" data-time="45" style="padding: 9px 8px; font-size: 11px;">45m</button>
+                        <button class="btn btn-option" data-time="60" style="padding: 9px 8px; font-size: 11px;">1h</button>
+                        <button class="btn btn-option" data-time="90" style="padding: 9px 8px; font-size: 11px;">1.5h</button>
+                        <button class="btn btn-option" data-time="120" style="padding: 9px 8px; font-size: 11px;">2h</button>
+                    </div>
+                </div>
+
+                <!-- Pace -->
+                <div class="control-group">
+                    <label class="control-label">🚶 Walking Pace</label>
+                    <div class="button-group" id="paceButtons" style="grid-template-columns: repeat(3, 1fr);">
+                        <button class="btn btn-option" data-pace="3.0" data-pace-label="Slow">Slow</button>
+                        <button class="btn btn-option active" data-pace="4.0" data-pace-label="Medium">Medium</button>
+                        <button class="btn btn-option" data-pace="5.0" data-pace-label="Fast">Fast</button>
+                    </div>
+                    <div style="font-size: 13px; color: var(--color-text-light); margin-top: 10px; padding: 10px 12px; background: var(--color-bg-alt); border-radius: 8px;" id="paceInfo">~4 km/h (moderate walk)</div>
+                </div>
+
+                <!-- Preferences (Toggle Switches) -->
+                <div class="control-group">
+                    <label class="control-label">✨ Route Preferences</label>
+                    <div class="toggle-group">
+                        <label class="toggle-item" id="prefScenicLabel">
+                            <span class="toggle-label">🌳 Scenic (parks, nature)</span>
+                            <div class="toggle-switch" id="prefScenicToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefQuietLabel">
+                            <span class="toggle-label">🤫 Quiet (less traffic)</span>
+                            <div class="toggle-switch" id="prefQuietToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefFlatLabel">
+                            <span class="toggle-label">➡️ Flat (low hills)</span>
+                            <div class="toggle-switch" id="prefFlatToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefDogLabel">
+                            <span class="toggle-label">🐕 Dog-friendly</span>
+                            <div class="toggle-switch" id="prefDogToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefPavedLabel">
+                            <span class="toggle-label">🛣️ Paved surfaces</span>
+                            <div class="toggle-switch" id="prefPavedToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefChildLabel">
+                            <span class="toggle-label">👧 Child-friendly</span>
+                            <div class="toggle-switch" id="prefChildToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefPushchairLabel">
+                            <span class="toggle-label">🚼 Pushchair-friendly</span>
+                            <div class="toggle-switch" id="prefPushchairToggle"></div>
+                        </label>
+                        <label class="toggle-item" id="prefWheelchairLabel">
+                            <span class="toggle-label">♿ Wheelchair accessible</span>
+                            <div class="toggle-switch" id="prefWheelchairToggle"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <button class="btn-primary" id="generateBtn">Generate My Stroll</button>
+
+                <!-- Route Results -->
+
+                <!-- Developer Promotion -->
+                <div class="dev-promo" id="devPromo">
+                    <h3>Help This Developer 🚀</h3>
+                    <p>Stroll is built by one person. Share it with a friend who loves walking!</p>
+                    <button class="dev-promo-btn" id="shareDevBtn">Share Stroll</button>
+                </div>
+            </div>
+
+            <!-- HISTORY TAB -->
+            <div id="history" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+                    <p style="color: var(--color-text-light); margin: 0;">❤️ Saved Routes</p>
+                    <button id="deleteHistoryBtn" style="background: rgba(198, 40, 40, 0.1); color: #c62828; border: 1px solid #c62828; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">Delete All</button>
+                </div>
+                <div id="historyList"></div>
+            </div>
+
+            <!-- CHALLENGES TAB -->
+            <div id="challenges" class="tab-content">
+                <p style="font-size: 13px; color: var(--color-primary); margin-bottom: 14px; font-weight: 500;">
+                    Complete weekly walking challenges for badges 🏅
+                </p>
+                <div id="challengesList"></div>
+                <div style="margin-top: 18px; padding: 14px; background: var(--color-bg-alt); border-radius: 10px; font-size: 13px; border: 1px solid var(--color-border);">
+                    <strong style="color: var(--color-primary);">Your Badges:</strong> <div id="badgesDisplay" style="margin-top: 10px; font-size: 20px;"></div>
+                </div>
+            </div>
+
+            <!-- POPULAR TAB -->
+            <div id="popular" class="tab-content">
+                <p style="text-align: center; color: var(--color-text-light); margin-top: 20px;">
+                    Community heat map coming soon 🔥
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 80vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700;">Settings</h2>
+            
+            <div style="margin-bottom: 18px;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="soundToggle" checked>
+                    <span style="font-weight: 500;">Sound Effects</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 18px;">
+                <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="notificationsToggle" checked>
+                    <span style="font-weight: 500;">Notifications</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 18px;">
+                <button class="btn-primary" id="pwaInstallBtn" style="display: none; background: var(--color-primary); color: white; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; margin: 0; margin-bottom: 12px;">📱 Install App (PWA)</button>
+                <button class="btn" id="pwaInfoBtn" style="width: 100%; padding: 12px; margin-bottom: 12px;">ℹ️ What is PWA?</button>
+                <button class="btn" id="coverageBtn" style="width: 100%; padding: 12px; margin-bottom: 12px;">🌍 Coverage & Roadmap</button>
+            </div>
+
+            <div style="margin-bottom: 20px; padding: 14px; background: var(--color-bg-alt); border-radius: 10px; border: 1px solid var(--color-border);">
+                <p style="font-size: 13px; margin-bottom: 10px; font-weight: 600; color: var(--color-primary);">💝 Support This Project</p>
+                <p style="font-size: 13px; margin-bottom: 12px; color: var(--color-text-light);">Stroll is free and always will be. Your support keeps development going.</p>
+                <a href="https://buymeacoffee.com/takingtimeback" target="_blank" style="display: inline-block; background: var(--color-primary); color: white; padding: 11px 16px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 13px;">☕ Buy Me a Coffee</a>
+            </div>
+
+            <button class="btn-primary" id="closeSettingsBtn">Close</button>
+        </div>
+    </div>
+
+    <!-- PWA Info Modal -->
+    <div id="pwaModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1001;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 80vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700; color: var(--color-text);">📱 Install Stroll as an App</h2>
+            
+            <div style="background: var(--color-bg-alt); padding: 16px; border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 18px;">
+                <p style="font-size: 14px; color: var(--color-text); line-height: 1.6; margin-bottom: 12px;">
+                    <strong>What is a PWA (Progressive Web App)?</strong>
+                </p>
+                <p style="font-size: 13px; color: var(--color-text-light); line-height: 1.6; margin-bottom: 12px;">
+                    Stroll can be installed on your phone like a regular app - no App Store needed!
+                </p>
+                
+                <div style="background: var(--color-bg); padding: 12px; border-radius: 8px; font-size: 13px; color: var(--color-text-light); margin-bottom: 12px;">
+                    <p style="margin: 0 0 8px 0;"><strong>✅ Benefits:</strong></p>
+                    <ul style="margin: 0; padding-left: 20px; color: var(--color-text-light);">
+                        <li>💾 Works offline (cached version)</li>
+                        <li>⚡ Loads faster than browser</li>
+                        <li>📱 Full-screen, like native app</li>
+                        <li>🔔 Can send notifications</li>
+                        <li>🎯 Home screen icon</li>
+                        <li>📱 No App Store needed</li>
+                    </ul>
+                </div>
+
+                <p style="font-size: 12px; color: var(--color-text-light); margin: 12px 0 0 0;">
+                    <strong>How to install:</strong>
+                </p>
+                <p style="font-size: 12px; color: var(--color-text-light); margin: 8px 0 0 0;">
+                    <strong>iPhone:</strong> Tap Share → Add to Home Screen<br>
+                    <strong>Android:</strong> Tap menu (⋮) → Install App or Add to Home Screen<br>
+                    <strong>Desktop:</strong> Click the install icon in your browser address bar
+                </p>
+            </div>
+
+            <button id="closePwaBtn" class="btn-primary" style="width: 100%;">Close</button>
+        </div>
+    </div>
+
+    <!-- Coverage & Roadmap Modal -->
+    <div id="coverageModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1001;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 85vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700; color: var(--color-text);">🌍 Coverage & Roadmap</h2>
+            
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-primary); margin-bottom: 12px;">✅ Currently Available</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 10px 0;"><strong>🇬🇧 United Kingdom</strong></p>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: var(--color-text-light); line-height: 1.8;">
+                        <li>England, Scotland, Wales, Northern Ireland</li>
+                        <li>Powered by official Ordnance Survey Open Roads data</li>
+                        <li>Routes guaranteed on pedestrian-safe infrastructure</li>
+                        <li>Data updated monthly for accuracy</li>
+                        <li>Full postcode coverage (all regions)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-primary); margin-bottom: 12px;">🔍 Investigating</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 12px;">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🇮🇪 Ireland</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0;">Evaluating data availability and licensing. No timeline confirmed.</p>
+                </div>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 13px; color: var(--color-text); margin: 0 0 8px 0;"><strong>🇳🇿 New Zealand</strong></p>
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0;">LINZ data has strong pedestrian infrastructure. Evaluation in progress.</p>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <h3 style="font-size: 15px; font-weight: 600; color: var(--color-primary); margin-bottom: 12px;">📋 Possible Future Expansion</h3>
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; border: 1px solid var(--color-border);">
+                    <p style="font-size: 12px; color: var(--color-text-light); margin: 0; line-height: 1.8;">
+                        <strong>Australia, Canada, EU countries</strong> - Data exists in these regions but requires significant integration work. Each region has different data structures and licensing requirements. <strong>No dates or timelines committed.</strong>
+                    </p>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px; padding: 14px; background: rgba(107, 144, 128, 0.1); border-radius: 10px; border: 1px solid var(--color-primary);">
+                <p style="font-size: 12px; color: var(--color-text); margin: 0; line-height: 1.6;">
+                    <strong>Why UK-first?</strong> The UK has the best publicly-available pedestrian data (Ordnance Survey). Other regions require different approaches. Stroll focuses on quality over speed - every region launched will have verified, reliable walking data.
+                </p>
+            </div>
+
+            <button id="closeCoverageBtn" class="btn-primary" style="width: 100%;">Close</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+        // ==================== PWA SETUP ====================
+        // Register service worker for offline support
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(reg => {
+                        console.log('✅ Service Worker registered');
+                        // Also check for app install state
+                        if (window.matchMedia('(display-mode: standalone)').matches) {
+                            console.log('✅ App already installed');
+                            document.getElementById('pwaInstallBtn').style.display = 'none';
+                        }
+                    })
+                    .catch(err => console.log('⚠️ Service Worker registration failed:', err));
+            });
+        }
+
+        // PWA Install Prompt
+        let deferredPrompt = null;
+        let canShowPrompt = true;
+
+        // Check if already installed
+        window.addEventListener('load', () => {
+            if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
+                console.log('✅ Running as standalone app');
+                document.getElementById('pwaInstallBtn').style.display = 'none';
+            }
+        });
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('📱 beforeinstallprompt fired - browser supports PWA');
+            e.preventDefault();
+            deferredPrompt = e;
+            
+            // Show install button
+            const pwaBtn = document.getElementById('pwaInstallBtn');
+            if (pwaBtn) {
+                pwaBtn.style.display = 'block';
+                console.log('📱 Install button shown');
+            }
+            
+            // Show popup hint first time (delayed)
+            setTimeout(() => {
+                if (!localStorage.getItem('pwaPromptSeen') && canShowPrompt) {
+                    showPwaPrompt();
+                    localStorage.setItem('pwaPromptSeen', 'true');
+                    console.log('📱 PWA popup shown');
+                }
+            }, 2000);
+        });
+
+        window.addEventListener('appinstalled', () => {
+            console.log('✅ PWA app installed successfully');
+            document.getElementById('pwaInstallBtn').style.display = 'none';
+            deferredPrompt = null;
+        });
+
+        function showPwaPrompt() {
+            const modal = document.getElementById('pwaModal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+        }
+
+        // Wait for DOM to be fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded, attaching button handlers...');
+        // ==================== STATE MANAGEMENT ====================
+        const state = {
+            location: null,
+            latitude: null,
+            longitude: null,
+            time: 15,
+            pace: 4.0,
+            paceLabel: 'Medium',
+            preferences: {
+                scenic: false,
+                quiet: false,
+                flat: false,
+                dog: false,
+                paved: false,
+                child: false,
+                pushchair: false,
+                wheelchair: false
+            },
+            currentRoute: null,
+            currentMap: null,
+            savedRoutes: [],
+            badges: [],
+            challenges: [
+                { id: 1, title: 'Walk 3 days this week', target: 3, current: 0, badge: '🏅' },
+                { id: 2, title: 'Total 10km this week', target: 10, current: 0, badge: '🚶' },
+                { id: 3, title: 'Try 2 new routes', target: 2, current: 0, badge: '🗺️' }
+            ]
+        };
+
+        // ==================== INITIALIZATION ====================
+        setupLogo();
+        loadFromStorage();
+        renderChallenges();
+        renderHistory();
+        showWelcomeIfNeeded();
+        setupToggleSwitches();
+
+        function setupLogo() {
+            const logo = document.getElementById('headerLogo');
+            if (logo) {
+                logo.onerror = function() {
+                    const header = document.querySelector('.header-left');
+                    header.innerHTML = '<div style="font-size: 28px; font-weight: bold; color: var(--color-primary);">//</div><div class="tagline">Taking Time Back</div>';
+                };
+            }
+        }
+
+        function loadFromStorage() {
+            const stored = localStorage.getItem('strollState');
+            if (stored) {
+                const saved = JSON.parse(stored);
+                state.savedRoutes = saved.savedRoutes || [];
+                state.badges = saved.badges || [];
+                state.challenges = saved.challenges || state.challenges;
+            }
+        }
+
+        function saveToStorage() {
+            localStorage.setItem('strollState', JSON.stringify({
+                savedRoutes: state.savedRoutes,
+                badges: state.badges,
+                challenges: state.challenges
+            }));
+        }
+
+        // ==================== WELCOME SCREEN ====================
+        function showWelcomeIfNeeded() {
+            const hasSeenWelcome = localStorage.getItem('strollWelcomeSeen');
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            
+            if (!hasSeenWelcome) {
+                welcomeScreen.classList.remove('hidden');
+            } else {
+                welcomeScreen.classList.add('hidden');
+            }
+        }
+
+        function hideWelcome() {
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            welcomeScreen.classList.add('hidden');
+            localStorage.setItem('strollWelcomeSeen', 'true');
+        }
+
+        document.getElementById('welcomeStartBtn').addEventListener('click', hideWelcome);
+        document.getElementById('welcomeSkipBtn').addEventListener('click', hideWelcome);
+
+        // ==================== TOGGLE SWITCHES ====================
+        function setupToggleSwitches() {
+            const toggles = {
+                'prefScenicToggle': 'scenic',
+                'prefQuietToggle': 'quiet',
+                'prefFlatToggle': 'flat',
+                'prefDogToggle': 'dog',
+                'prefPavedToggle': 'paved',
+                'prefChildToggle': 'child',
+                'prefPushchairToggle': 'pushchair',
+                'prefWheelchairToggle': 'wheelchair'
+            };
+
+            Object.entries(toggles).forEach(([elementId, prefKey]) => {
+                const toggle = document.getElementById(elementId);
+                const label = document.getElementById(elementId.replace('Toggle', 'Label'));
+                
+                if (toggle && label) {
+                    label.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        state.preferences[prefKey] = !state.preferences[prefKey];
+                        updateToggleVisuals();
+                    });
+                }
+            });
+
+            updateToggleVisuals();
+        }
+
+        function updateToggleVisuals() {
+            const toggles = {
+                'prefScenicToggle': 'scenic',
+                'prefQuietToggle': 'quiet',
+                'prefFlatToggle': 'flat',
+                'prefDogToggle': 'dog',
+                'prefPavedToggle': 'paved',
+                'prefChildToggle': 'child',
+                'prefPushchairToggle': 'pushchair',
+                'prefWheelchairToggle': 'wheelchair'
+            };
+
+            Object.entries(toggles).forEach(([elementId, prefKey]) => {
+                const toggle = document.getElementById(elementId);
+                if (toggle) {
+                    if (state.preferences[prefKey]) {
+                        toggle.classList.add('active');
+                    } else {
+                        toggle.classList.remove('active');
+                    }
+                }
+            });
+        }
+
+        // ==================== TAB NAVIGATION ====================
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.getElementById(tabName).classList.add('active');
+                btn.classList.add('active');
+            });
+        });
+
+        // ==================== LOCATION ====================
+        document.getElementById('gpsBtn').addEventListener('click', () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(pos => {
+                    state.latitude = pos.coords.latitude;
+                    state.longitude = pos.coords.longitude;
+                    state.location = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+                    document.getElementById('locationInput').value = state.location;
+                    showToast('📍 Location set!');
+                });
+            } else {
+                showError('Geolocation not supported');
+            }
+        });
+
+        document.getElementById('locationInput').addEventListener('change', (e) => {
+            state.location = e.target.value;
+        });
+
+        // ==================== TIME ====================
+        document.querySelectorAll('[data-time]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                state.time = parseInt(e.target.dataset.time);
+                document.querySelectorAll('[data-time]').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+            });
+        });
+
+        // ==================== PACE ====================
+        document.querySelectorAll('[data-pace]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                state.pace = parseFloat(e.target.dataset.pace);
+                state.paceLabel = e.target.dataset.paceLabel;
+                document.querySelectorAll('[data-pace]').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                updatePaceInfo();
+            });
+        });
+
+        function updatePaceInfo() {
+            const descriptions = {
+                'Slow': '~3 km/h (leisurely walk)',
+                'Medium': '~4 km/h (moderate walk)',
+                'Fast': '~5 km/h (brisk walk)'
+            };
+            const el = document.getElementById('paceInfo');
+            if (el) el.textContent = descriptions[state.paceLabel] || '';
+        }
+
+        // ==================== GENERATE ROUTE ====================
+        const API_URL = '/.netlify/functions/generate-route';
+
+        document.getElementById('generateBtn').addEventListener('click', async () => {
+            if (!state.location) {
+                showError('Please enter a location');
+                return;
+            }
+
+            const btn = document.getElementById('generateBtn');
+            btn.textContent = 'Generating route...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        location: state.location,
+                        time: state.time,
+                        pace: state.pace,
+                        preferences: state.preferences
+                    })
+                });
+
+                const data = await response.json();
+
+                // Log debug info if available
+                if (data.debug) {
+                    console.log('🔧 ROUTE DEBUG:', data.debug);
+                }
+
+                if (!response.ok || !data.success) {
+                    const msg = data.error || 'Route generation failed';
+                    console.error('❌ Route error:', msg);
+                    throw new Error(msg);
+                }
+
+                if (!data.coordinates || data.coordinates.length < 2) {
+                    throw new Error('Invalid route data received');
+                }
+
+                state.currentRoute = {
+                    id: Date.now(),
+                    ...data,
+                    timestamp: new Date().toISOString(),
+                    distance: (data.distance || 0).toFixed(1),
+                    calories: Math.round(state.time * (state.pace / 4) * 8),
+                    rating: 0
+                };
+
+                displayRoute();
+            } catch (error) {
+                console.error('Route generation error:', error.message);
+                showError(error.message || 'Unable to generate route. Please try again.');
+            } finally {
+                btn.textContent = 'Generate My Stroll';
+                btn.disabled = false;
+            }
+        });
+
+        function displayRoute() {
+            const modal = document.getElementById('resultsModal');
+            modal.style.display = 'flex';
+
+            const km = state.currentRoute.distance || 3.2;
+            const miles = (km * 0.621371).toFixed(1);
+            document.getElementById('resultDistance').textContent = `${km} km (${miles} miles)`;
+
+            // DRAW MAP
+            setTimeout(() => {
+                drawMap(state.currentRoute.coordinates);
+            }, 100);
+        }
+
+
+        function drawMap(coordinates) {
+            if (!coordinates || coordinates.length === 0) {
+                console.error('No coordinates provided');
+                return;
+            }
+
+            const mapContainer = document.getElementById('modalMap');
+            if (!mapContainer) {
+                console.error('Modal map container not found');
+                return;
+            }
+
+            // Destroy old map if it exists
+            if (state.currentMap) {
+                state.currentMap.remove();
+                state.currentMap = null;
+            }
+
+            // Clear existing map container completely
+            mapContainer.innerHTML = '';
+
+            // Initialize new map
+            try {
+                const map = L.map('modalMap').setView([coordinates[0][0], coordinates[0][1]], 14);
+                state.currentMap = map;
+
+                // Add tile layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(map);
+
+                // Draw route line
+                L.polyline(coordinates, {
+                    color: '#6b9080',
+                    weight: 4,
+                    opacity: 0.8,
+                    smoothFactor: 1
+                }).addTo(map);
+
+                // Add start marker (green)
+                L.marker(coordinates[0], {
+                    icon: L.icon({
+                        iconUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22%236b9080%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%228%22 fill=%22white%22/%3E%3C/svg%3E',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16],
+                        popupAnchor: [0, -16]
+                    })
+                }).bindPopup('Start').addTo(map);
+
+                // Add end marker (orange)
+                L.marker(coordinates[coordinates.length - 1], {
+                    icon: L.icon({
+                        iconUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22%23FC5200%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%238%22 fill=%22white%22/%3E%3C/svg%3E',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16],
+                        popupAnchor: [0, -16]
+                    })
+                }).bindPopup('End').addTo(map);
+
+                // Fit map to route with padding
+                const bounds = L.latLngBounds(coordinates);
+                map.fitBounds(bounds, { padding: [50, 50] });
+
+                // Invalidate size after showing
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 200);
+
+            } catch (error) {
+                console.error('Error drawing map:', error);
+            }
+        }
+
+        // ==================== RATING ====================
+        document.querySelectorAll('#ratingInput span').forEach(span => {
+            span.addEventListener('click', (e) => {
+                const rating = parseInt(e.target.dataset.rating);
+                state.currentRoute.rating = rating;
+                document.getElementById('ratingMsg').textContent = `Rated: ${rating}/5 ⭐`;
+                showToast(`Route rated: ${rating}/5 ⭐`);
+            });
+        });
+
+        // ==================== SHARING ====================
+        function getShareText() {
+            return `Just generated an awesome ${state.currentRoute.distance}km walk with Stroll! Generated in seconds, took hours. 🚶 ${window.location.href}`;
+        }
+
+        // ==================== CHALLENGES ====================
+        function renderChallenges() {
+            const list = document.getElementById('challengesList');
+            list.innerHTML = state.challenges.map(c => `
+                <div class="challenge-card">
+                    <div class="challenge-title">${c.badge} ${c.title}</div>
+                    <div style="font-size: 12px; color: var(--color-text-light);">${c.current}/${c.target}</div>
+                    <div class="challenge-progress">
+                        <div class="challenge-progress-bar" style="width: ${(c.current / c.target) * 100}%"></div>
+                    </div>
+                </div>
+            `).join('');
+
+            const badges = document.getElementById('badgesDisplay');
+            badges.textContent = state.badges.length > 0 ? state.badges.join(' ') : 'No badges yet. Complete challenges!';
+        }
+
+        // ==================== HISTORY ====================
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            const deleteBtn = document.getElementById('deleteHistoryBtn');
+            
+            if (state.savedRoutes.length === 0) {
+                list.innerHTML = '<p style="text-align: center; color: var(--color-text-light); margin-top: 20px;">No saved routes yet. Save a route to see it here!</p>';
+                deleteBtn.style.display = 'none';
+                return;
+            }
+
+            deleteBtn.style.display = 'block';
+            list.innerHTML = state.savedRoutes.map(route => `
+                <div style="background: var(--color-bg-alt); padding: 14px; border-radius: 10px; margin-bottom: 12px; border: 1px solid var(--color-border);">
+                    <div style="font-weight: 700; margin-bottom: 6px; color: var(--color-text);">${route.distance}km • ${route.time}min</div>
+                    <div style="font-size: 12px; color: var(--color-text-light);">Rating: ${'⭐'.repeat(route.rating || 0)}</div>
+                    <button class="btn" style="width: 100%; margin-top: 10px; font-size: 12px; padding: 10px; border: 1.5px solid var(--color-border); background: var(--color-bg); border-radius: 8px;">Repeat This Route</button>
+                </div>
+            `).join('');
+        }
+
+        // ==================== SETTINGS ====================
+        // Info button - show welcome screen again
+        document.getElementById('infoBtn').addEventListener('click', () => {
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            welcomeScreen.classList.remove('hidden');
+        });
+
+        // PWA Install button handler
+        document.getElementById('pwaInstallBtn').addEventListener('click', () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        console.log('✅ User accepted PWA install');
+                        document.getElementById('pwaInstallBtn').style.display = 'none';
+                        alert('✅ Stroll installed! Check your home screen or app drawer.');
+                    } else {
+                        console.log('❌ User rejected PWA install');
+                    }
+                    deferredPrompt = null;
+                });
+            }
+        });
+
+        // PWA Info modal
+        document.getElementById('pwaInfoBtn').addEventListener('click', () => {
+            document.getElementById('pwaModal').style.display = 'flex';
+        });
+
+        document.getElementById('closePwaBtn').addEventListener('click', () => {
+            document.getElementById('pwaModal').style.display = 'none';
+        });
+
+        // Coverage & Roadmap modal
+        document.getElementById('coverageBtn').addEventListener('click', () => {
+            document.getElementById('coverageModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeCoverageBtn').addEventListener('click', () => {
+            document.getElementById('coverageModal').style.display = 'none';
+        });
+
+        // Coverage link in welcome screen
+        document.getElementById('coverageInfoLink').addEventListener('click', () => {
+            document.getElementById('welcomeScreen').classList.add('hidden');
+            document.getElementById('coverageModal').style.display = 'flex';
+        });
+
+        // Settings button
+        document.getElementById('settingsBtn').addEventListener('click', () => {
+            document.getElementById('settingsModal').style.display = 'flex';
+        });
+
+        document.getElementById('closeSettingsBtn').addEventListener('click', () => {
+            document.getElementById('settingsModal').style.display = 'none';
+        });
+
+        // Stats button
+        document.getElementById('statsBtn').addEventListener('click', () => {
+            alert('📊 Stats: You can track your routes and progress in the History tab!');
+        });
+
+        // Delete history button
+        document.getElementById('deleteHistoryBtn').addEventListener('click', () => {
+            if (state.savedRoutes.length === 0) {
+                alert('No history to delete!');
+                return;
+            }
+            
+            if (confirm('Are you sure you want to delete all saved routes? This cannot be undone.')) {
+                state.savedRoutes = [];
+                saveToStorage();
+                renderHistory();
+                showToast('All history deleted!');
+            }
+        });
+
+        // Results modal
+        document.getElementById('closeResultsModal').addEventListener('click', () => {
+            document.getElementById('resultsModal').style.display = 'none';
+        });
+
+        document.getElementById('newRouteBtn').addEventListener('click', async () => {
+            // Generate another route for SAME location
+            const btn = document.getElementById('newRouteBtn');
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        location: state.location,
+                        time: state.time,
+                        pace: state.pace,
+                        preferences: state.preferences
+                    })
+                });
+
+                const data = await response.json();
+
+                // Log debug info if available
+                if (data.debug) {
+                    console.log('🔧 ROUTE DEBUG:', data.debug);
+                }
+
+                if (!response.ok) {
+                    const msg = data.error || 'Route generation failed';
+                    console.error('❌ Route error:', msg);
+                    throw new Error(msg);
+                }
+
+                state.currentRoute = {
+                    id: Date.now(),
+                    ...data,
+                    timestamp: new Date().toISOString(),
+                    distance: (data.distance || 0).toFixed(1),
+                    calories: Math.round(state.time * (state.pace / 4) * 8),
+                    rating: 0
+                };
+
+                displayRoute();
+            } catch (error) {
+                console.error('Route generation error:', error.message);
+                showError(error.message || 'Unable to generate route. Please try again.');
+            } finally {
+                btn.textContent = 'Generate Another';
+                btn.disabled = false;
+            }
+        });
+
+        document.getElementById('differentRouteBtn').addEventListener('click', () => {
+            document.getElementById('resultsModal').style.display = 'none';
+            // Clear location and let user enter new one
+            document.getElementById('locationInput').value = '';
+            document.getElementById('locationInput').focus();
+        });
+
+        // Share buttons
+        document.getElementById('shareTwitter').addEventListener('click', () => {
+            const text = `Just generated a ${state.currentRoute.distance}km walk with Stroll! Try it: strollapp.netlify.app`;
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+        });
+
+        document.getElementById('shareWhatsApp').addEventListener('click', () => {
+            const text = `Check out this ${state.currentRoute.distance}km walk I generated with Stroll! strollapp.netlify.app`;
+            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+        });
+
+        document.getElementById('shareFacebook').addEventListener('click', () => {
+            const text = `Check out this amazing ${state.currentRoute.distance}km walking route I just created with Stroll!`;
+            window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('strollapp.netlify.app')}&quote=${encodeURIComponent(text)}`, '_blank');
+        });
+
+        document.getElementById('shareInstagram').addEventListener('click', () => {
+            const text = `Generated a ${state.currentRoute.distance}km walking route with Stroll! 🚶‍♀️🗺️ Check it out: strollapp.netlify.app`;
+            alert(`Instagram doesn't have a direct share link. Copy this:\n\n${text}`);
+            navigator.clipboard.writeText(text);
+        });
+
+        document.getElementById('shareNative').addEventListener('click', () => {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Stroll - Walking Route Generator',
+                    text: `Check out this ${state.currentRoute.distance}km walking route I generated with Stroll!`,
+                    url: 'https://strollapp.netlify.app'
+                }).catch(err => console.log('Share failed:', err));
+            } else {
+                navigator.clipboard.writeText(`https://strollapp.netlify.app`);
+                alert('Native share not supported on this device. Link copied to clipboard!');
+            }
+        });
+
+        // Download functions
+        function downloadFile(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }
+
+        function generateGPX(coordinates) {
+            const points = coordinates.map(coord => 
+                `    <trkpt lat="${coord[0]}" lon="${coord[1]}"></trkpt>`
+            ).join('\n');
+            
+            return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Stroll">
+  <trk>
+    <name>Stroll Route</name>
+    <trkseg>
+${points}
+    </trkseg>
+  </trk>
+</gpx>`;
+        }
+
+        function generateKML(coordinates) {
+            const lineString = coordinates.map(coord => `${coord[1]},${coord[0]},0`).join(' ');
+            
+            return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Stroll Route</name>
+    <Placemark>
+      <name>Your Walking Route</name>
+      <LineString>
+        <coordinates>${lineString}</coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>`;
+        }
+
+        function generateCSV(coordinates) {
+            const header = 'Latitude,Longitude\n';
+            const rows = coordinates.map(coord => `${coord[0]},${coord[1]}`).join('\n');
+            return header + rows;
+        }
+
+        document.getElementById('downloadGPX').addEventListener('click', () => {
+            if (state.currentRoute && state.currentRoute.coordinates) {
+                const gpx = generateGPX(state.currentRoute.coordinates);
+                downloadFile(gpx, 'stroll-route.gpx', 'application/gpx+xml');
+                showToast('GPX downloaded! Import to Strava, Garmin, etc.');
+            } else {
+                alert('Generate a route first!');
+            }
+        });
+
+        document.getElementById('downloadKML').addEventListener('click', () => {
+            if (state.currentRoute && state.currentRoute.coordinates) {
+                const kml = generateKML(state.currentRoute.coordinates);
+                downloadFile(kml, 'stroll-route.kml', 'application/vnd.google-earth.kml+xml');
+                showToast('KML downloaded! Open in Google Maps');
+            } else {
+                alert('Generate a route first!');
+            }
+        });
+
+        document.getElementById('downloadCSV').addEventListener('click', () => {
+            if (state.currentRoute && state.currentRoute.coordinates) {
+                const csv = generateCSV(state.currentRoute.coordinates);
+                downloadFile(csv, 'stroll-route.csv', 'text/csv');
+                showToast('CSV downloaded! Open in Excel/Sheets');
+            } else {
+                alert('Generate a route first!');
+            }
+        });
+
+        document.getElementById('openGoogleMaps').addEventListener('click', () => {
+            if (state.currentRoute && state.currentRoute.coordinates && state.currentRoute.coordinates.length > 0) {
+                const coords = state.currentRoute.coordinates;
+                // Create URL with all waypoints
+                const waypoints = coords.slice(1, -1).map(c => `${c[0]},${c[1]}`).join('|');
+                const mapsUrl = `https://www.google.com/maps/dir/${coords[0][0]},${coords[0][1]}/${coords[coords.length-1][0]},${coords[coords.length-1][1]}/`;
+                window.open(mapsUrl, '_blank');
+                showToast('Opening in Google Maps!');
+            } else {
+                alert('Generate a route first!');
+            }
+        });
+
+        // Rating
+        document.getElementById('ratingInput').addEventListener('click', (e) => {
+            if (e.target.textContent === '⭐') {
+                alert('Route rated! Thanks for the feedback!');
+            }
+        });
+
+        // ==================== DARK MODE ====================
+        document.getElementById('darkModeBtn').addEventListener('click', () => {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-theme') === 'dark';
+            const newTheme = isDark ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            console.log('Theme switched to:', newTheme);
+        });
+
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+
+        // ==================== UTILITIES ====================
+        function showError(msg) {
+            const box = document.getElementById('errorBox');
+            if (box) {
+                box.textContent = msg;
+                box.classList.remove('hidden');
+                setTimeout(() => box.classList.add('hidden'), 5000);
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2000);
+        }
+        }); // End DOMContentLoaded
+    </script>
+
+    <!-- Results Modal Popup -->
+    <div id="resultsModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: none; align-items: flex-end; z-index: 2000; animation: slideUp 0.3s ease-out;">
+        <div style="background: white; width: 100%; max-height: 90vh; border-radius: 20px 20px 0 0; overflow-y: auto; padding: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="font-size: 20px; font-weight: 700; margin: 0; color: var(--color-text);">Your Route</h2>
+                <button id="closeResultsModal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--color-primary); padding: 0;">✕</button>
+            </div>
+            <div id="modalMap" style="width: 100%; height: 300px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--color-border);"></div>
+            <div style="background: var(--color-bg); border-radius: 12px; padding: 18px; border: 1px solid var(--color-border);">
+                <div style="margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border);">
+                    <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 6px;">Distance</div>
+                    <div id="resultDistance" style="font-size: 15px; font-weight: 600;">-</div>
+                </div>
+                <div style="margin-bottom: 14px;">
+                    <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 6px;">Rate This Route</div>
+                    <div id="ratingInput" style="font-size: 26px; letter-spacing: 10px; cursor: pointer; margin-top: 10px;">⭐⭐⭐⭐⭐</div>
+                </div>
+                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--color-border);">
+                    <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 12px;">Share This Route</div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 16px;">
+                        <button id="shareTwitter" style="padding: 16px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity 0.2s;">
+                            <span style="font-size: 28px;">𝕏</span>
+                            <span>Twitter</span>
+                        </button>
+                        <button id="shareWhatsApp" style="padding: 16px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity 0.2s;">
+                            <span style="font-size: 28px;">💬</span>
+                            <span>WhatsApp</span>
+                        </button>
+                        <button id="shareFacebook" style="padding: 16px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity 0.2s;">
+                            <span style="font-size: 28px;">f</span>
+                            <span>Facebook</span>
+                        </button>
+                        <button id="shareInstagram" style="padding: 16px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity 0.2s;">
+                            <span style="font-size: 28px;">📸</span>
+                            <span>Instagram</span>
+                        </button>
+                        <button id="shareNative" style="padding: 16px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity 0.2s; grid-column: 1 / -1;">
+                            <span style="font-size: 28px;">↗️</span>
+                            <span>Share to Other Apps</span>
+                        </button>
+                    </div>
+                    <div style="font-size: 11px; text-transform: uppercase; color: var(--color-primary); font-weight: 700; margin-bottom: 12px;">Download Route</div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                        <button id="downloadGPX" style="padding: 14px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                            <span style="font-size: 20px;">📥</span>
+                            <span>GPX (Strava)</span>
+                        </button>
+                        <button id="downloadKML" style="padding: 14px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                            <span style="font-size: 20px;">📥</span>
+                            <span>KML (Maps)</span>
+                        </button>
+                        <button id="downloadCSV" style="padding: 14px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                            <span style="font-size: 20px;">📥</span>
+                            <span>CSV (Excel)</span>
+                        </button>
+                        <button id="openGoogleMaps" style="padding: 14px; font-size: 13px; font-weight: 600; border: none; background: var(--color-primary); color: white; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                            <span style="font-size: 20px;">🗺️</span>
+                            <span>Open Maps</span>
+                        </button>
+                    </div>
+                </div>
+                <button id="newRouteBtn" style="width: 100%; background: var(--color-primary); color: white; padding: 16px; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 16px;">Generate Another</button>
+                <button id="differentRouteBtn" style="width: 100%; background: var(--color-bg-alt); color: var(--color-text); padding: 14px; border: 1.5px solid var(--color-border); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px;">🔄 Different Route (New Location)</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(100px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .hidden { display: none !important; }
+    </style>
+
+</body>
+</html>
