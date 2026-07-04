@@ -26,70 +26,74 @@ exports.handler = async (event) => {
     const distanceKm = (time / 60) * pace;
     console.log('📍 Distance target:', distanceKm, 'km');
 
-    // STEP 3: Create DENSE waypoints with SMALL radius
-    // KEY: Small radius + many waypoints = forces use of local roads, avoids highways
-    console.log('📍 Creating dense waypoint grid...');
+    // STEP 3: Create waypoints
+    console.log('📍 Creating waypoints...');
     
-    let radius = 0.005; // SMALL - keeps route very local
+    let radius = 0.005;
     if (distanceKm > 3) radius = 0.008;
     if (distanceKm > 5) radius = 0.012;
     if (distanceKm > 8) radius = 0.015;
 
-    // MANY waypoints = densely packed = can't use bypass
-    const numWaypoints = Math.max(12, Math.ceil(distanceKm / 1.5));
+    const numWaypoints = Math.max(10, Math.ceil(distanceKm / 1.5));
     const waypoints = [];
-
-    console.log('📍 Creating', numWaypoints, 'waypoints with radius', radius);
 
     for (let i = 0; i < numWaypoints; i++) {
       const angle = (i / numWaypoints) * Math.PI * 2;
       const variation = 1 + (Math.random() - 0.5) * 0.15;
       const lat = centerLat + radius * Math.sin(angle) * variation;
       const lng = centerLng + radius * Math.cos(angle) * variation;
-      waypoints.push([lng, lat]);
+      waypoints.push({ point: { lat, lng } });
     }
     
-    // Close the loop
-    waypoints.push(waypoints[0]);
-    console.log('✅ Waypoints created:', waypoints.length);
+    waypoints.push(waypoints[0]); // Close loop
+    console.log('✅ Waypoints:', waypoints.length);
 
-    // STEP 4: Call OSRM with foot profile
-    console.log('📍 Routing with OSRM foot profile...');
+    // STEP 4: Call GraphHopper with avoid=motorway,trunk,primary
+    // This REFUSES to use A-roads, motorways, dual carriageways
+    console.log('📍 Routing with GraphHopper (avoiding motorways)...');
     
-    const waypointString = waypoints.map(p => `${p[0]},${p[1]}`).join(';');
-    const routeUrl = `https://router.project-osrm.org/route/v1/foot/${waypointString}?steps=false&geometries=geojson&overview=full`;
+    // Build points string: lat,lng;lat,lng;...
+    const pointsString = waypoints.map(w => `${w.point.lat},${w.point.lng}`).join(';');
+    
+    const graphhopperUrl = `https://graphhopper.com/api/1/route?` +
+      `points=${encodeURIComponent(pointsString)}` +
+      `&profile=foot` +
+      `&avoid=motorway,trunk,primary` +
+      `&locale=en` +
+      `&points_encoded=false` +
+      `&key=7ea3e26c-e487-4f9a-b52b-b86c5b5cc387`;
 
-    console.log('📍 OSRM URL:', routeUrl.substring(0, 100) + '...');
+    console.log('📍 GraphHopper request sent');
 
-    const routeResponse = await fetch(routeUrl);
+    const routeResponse = await fetch(graphhopperUrl);
 
     if (!routeResponse.ok) {
-      console.error('❌ OSRM error:', routeResponse.status);
+      console.error('❌ GraphHopper error:', routeResponse.status);
+      console.log('Using fallback route');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
     }
 
-    const routeText = await routeResponse.text();
-    console.log('✅ OSRM response received:', routeText.length, 'bytes');
+    const routeData = await routeResponse.json();
+    console.log('✅ GraphHopper response received');
 
-    let routeData;
-    try {
-      routeData = JSON.parse(routeText);
-    } catch (e) {
-      console.error('❌ Parse error:', e.message);
-      return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
-    }
-
-    if (routeData.code !== 'Ok' || !routeData.routes || routeData.routes.length === 0) {
-      console.log('❌ OSRM returned no routes, using fallback');
+    if (!routeData.paths || routeData.paths.length === 0) {
+      console.log('❌ No paths returned, fallback');
       return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
     }
 
     // STEP 5: Extract coordinates
-    console.log('📍 Extracting route coordinates...');
-    const route = routeData.routes[0];
-    const coordinates = route.geometry.coordinates.map(c => [c[1], c[0]]);
+    console.log('📍 Extracting coordinates...');
+    const path = routeData.paths[0];
     
-    const actualDistance = (route.distance / 1000).toFixed(1);
+    if (!path.points || !path.points.coordinates) {
+      console.log('❌ No coordinates, fallback');
+      return fallbackRoute(centerLat, centerLng, distanceKm, difficulty);
+    }
+
+    // GraphHopper returns [lat, lng]
+    const coordinates = path.points.coordinates;
+    
+    const actualDistance = (path.distance / 1000).toFixed(1);
     const elevationGain = difficulty === 'easy' ? 50 : difficulty === 'moderate' ? 150 : 250;
 
     console.log('✅ Route generated:', {
@@ -124,7 +128,7 @@ function fallbackRoute(centerLat, centerLng, distanceKm, difficulty) {
   if (distanceKm > 3) radius = 0.008;
   if (distanceKm > 5) radius = 0.012;
 
-  const numWaypoints = Math.max(12, Math.ceil(distanceKm / 1.5));
+  const numWaypoints = Math.max(10, Math.ceil(distanceKm / 1.5));
   const coordinates = [];
 
   for (let i = 0; i <= numWaypoints; i++) {
