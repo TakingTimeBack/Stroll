@@ -1723,10 +1723,43 @@
             document.getElementById('resultsModal').style.display = 'none';
         });
 
-        document.getElementById('newRouteBtn').addEventListener('click', () => {
-            document.getElementById('resultsModal').style.display = 'none';
-            // Keep location for generating another route same location
-            document.getElementById('locationInput').focus();
+        document.getElementById('newRouteBtn').addEventListener('click', async () => {
+            // Generate another route for SAME location
+            const btn = document.getElementById('newRouteBtn');
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        location: state.location,
+                        time: state.time,
+                        pace: state.pace,
+                        preferences: state.preferences
+                    })
+                });
+
+                if (!response.ok) throw new Error('Route generation failed');
+
+                const data = await response.json();
+                state.currentRoute = {
+                    id: Date.now(),
+                    ...data,
+                    timestamp: new Date().toISOString(),
+                    distance: (data.distance || 0).toFixed(1),
+                    calories: Math.round(state.time * (state.pace / 4) * 8),
+                    rating: 0
+                };
+
+                displayRoute();
+            } catch (error) {
+                showError('Unable to generate route. Please try again.');
+            } finally {
+                btn.textContent = 'Generate Another';
+                btn.disabled = false;
+            }
         });
 
         document.getElementById('differentRouteBtn').addEventListener('click', () => {
