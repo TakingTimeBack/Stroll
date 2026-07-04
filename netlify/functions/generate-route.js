@@ -1,22 +1,19 @@
 /**
- * STROLL COMPLETE ROUTING ENGINE
+ * STROLL COMPLETE ROUTING ENGINE v2
  * 
- * Multi-layer fallback architecture:
- * Layer 1: Overpass API (primary)
- * Layer 2: Direct OSM data (fallback)
- * Layer 3: Synthetic network routing (guaranteed)
- * 
- * Will ALWAYS return a route, even if it's synthetic.
+ * Uses OSRM (Open Source Routing Machine) for real pedestrian routing
+ * Finds cardinal waypoints, routes between them with OSRM
+ * Streams coordinates to frontend for live plotting
  */
+
+const https = require('https');
 
 exports.handler = async (event) => {
   const LOG = [];
-  const startTime = Date.now();
   
   try {
-    LOG.push('=== STROLL ROUTER START ===');
+    LOG.push('=== STROLL ROUTER (OSRM) ===');
     
-    // Parse input
     let body;
     try {
       body = JSON.parse(event.body);
@@ -24,7 +21,7 @@ exports.handler = async (event) => {
       return respond(400, { error: 'Invalid JSON', debug: LOG });
     }
 
-    const { location, time, pace, preferences } = body;
+    const { location, time, pace } = body;
     LOG.push(`INPUT: ${location}, ${time}min, ${pace}km/h`);
 
     if (!location || time === undefined || !pace) {
@@ -32,7 +29,7 @@ exports.handler = async (event) => {
     }
 
     // GEOCODE
-    LOG.push('STEP: Geocoding with Nominatim');
+    LOG.push('STEP: Geocoding');
     const [lat, lng] = await geocodeFinal(location) || [];
     if (!lat) {
       return respond(400, { error: `Could not geocode: ${location}`, debug: LOG });
@@ -42,118 +39,98 @@ exports.handler = async (event) => {
     const targetKm = (time / 60) * pace;
     LOG.push(`TARGET: ${targetKm.toFixed(2)}km`);
 
-    // FETCH WAYS - MULTI-LAYER
-    LOG.push('STEP: Fetching street data (Layer 1: Overpass)');
-    let ways = await fetchViaOverpass(lat, lng, targetKm, LOG);
+    // GENERATE CARDINAL WAYPOINTS
+    LOG.push('STEP: Finding cardinal waypoints');
+    const waypoints = findCardinalWaypoints(lat, lng, targetKm / 2);
+    LOG.push(`WAYPOINTS: ${waypoints.length}`);
+
+    // ROUTE via OSRM
+    LOG.push('STEP: Routing with OSRM');
+    const coordinates = [];
     
-    if (!ways || ways.length === 0) {
-      LOG.push('LAYER 1 FAILED - trying Layer 2: Direct OSM query');
-      ways = await fetchViaOSMDirect(lat, lng, targetKm, LOG);
+    // Route from center to North waypoint
+    LOG.push('  Route 1: Center → North');
+    const route1 = await routeViaOSRM([lng, lat], [waypoints.north.lng, waypoints.north.lat]);
+    if (route1 && route1.length > 0) {
+      coordinates.push(...route1);
+      LOG.push(`    ✓ ${route1.length} points`);
     }
 
-    if (!ways || ways.length === 0) {
-      LOG.push('LAYER 2 FAILED - using Layer 3: Synthetic network');
-      ways = generateSyntheticNetwork(lat, lng, targetKm, LOG);
+    // Route from North to East
+    LOG.push('  Route 2: North → East');
+    const route2 = await routeViaOSRM([waypoints.north.lng, waypoints.north.lat], [waypoints.east.lng, waypoints.east.lat]);
+    if (route2 && route2.length > 0) {
+      coordinates.push(...route2.slice(1)); // Skip first point (duplicate)
+      LOG.push(`    ✓ ${route2.length} points`);
     }
 
-    LOG.push(`WAYS_AVAILABLE: ${ways.length}`);
+    // Route from East to South
+    LOG.push('  Route 3: East → South');
+    const route3 = await routeViaOSRM([waypoints.east.lng, waypoints.east.lat], [waypoints.south.lng, waypoints.south.lat]);
+    if (route3 && route3.length > 0) {
+      coordinates.push(...route3.slice(1));
+      LOG.push(`    ✓ ${route3.length} points`);
+    }
 
-    if (!ways || ways.length === 0) {
-      LOG.push('CRITICAL: No ways available, generating fallback circle');
-      const fallbackRoute = generateFallbackCircle(lat, lng, targetKm);
+    // Route from South to West
+    LOG.push('  Route 4: South → West');
+    const route4 = await routeViaOSRM([waypoints.south.lng, waypoints.south.lat], [waypoints.west.lng, waypoints.west.lat]);
+    if (route4 && route4.length > 0) {
+      coordinates.push(...route4.slice(1));
+      LOG.push(`    ✓ ${route4.length} points`);
+    }
+
+    // Route from West back to center
+    LOG.push('  Route 5: West → Center');
+    const route5 = await routeViaOSRM([waypoints.west.lng, waypoints.west.lat], [lng, lat]);
+    if (route5 && route5.length > 0) {
+      coordinates.push(...route5.slice(1));
+      LOG.push(`    ✓ ${route5.length} points`);
+    }
+
+    if (coordinates.length < 2) {
+      LOG.push('WARN: Insufficient coordinates, fallback');
+      const fallback = generateFallbackCircle(lat, lng, targetKm);
       return respond(200, {
-        coordinates: fallbackRoute.coords,
-        distance: fallbackRoute.dist,
-        elevation: Math.round(50 + fallbackRoute.dist / 2),
+        coordinates: fallback.coords,
+        distance: fallback.dist,
+        elevation: Math.round(50 + fallback.dist / 2),
         duration: time,
         location,
         pattern: 'fallback-circle',
         success: true,
-        warning: 'Using fallback route - limited data available',
+        warning: 'Using fallback route',
         debug: LOG
       });
     }
 
-    // SCORE WAYS
-    LOG.push('STEP: Scoring ways');
-    const scored = ways.map(w => ({
-      ...w,
-      score: scoreWayComprehensive(w)
-    }));
-
-    const walkable = scored.filter(w => w.score >= 0.15);
-    LOG.push(`WALKABLE: ${walkable.length}/${scored.length}`);
-
-    if (walkable.length < 2) {
-      LOG.push('WARN: Few walkable ways, using all');
-      walkable.push(...scored.filter(w => w.score >= 0.05));
+    // Calculate distance
+    let totalDist = 0;
+    for (let i = 0; i < coordinates.length - 1; i++) {
+      totalDist += haversine(coordinates[i][0], coordinates[i][1], coordinates[i+1][0], coordinates[i+1][1]);
     }
 
-    // BUILD GRAPH
-    LOG.push('STEP: Building graph');
-    const graph = buildGraphComplete(walkable, lat, lng);
-    LOG.push(`GRAPH: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);
-
-    if (graph.nodes.length < 2) {
-      LOG.push('WARN: Graph too small, generating synthetic');
-      const synthRoute = generateSyntheticRoute(lat, lng, targetKm);
-      return respond(200, {
-        coordinates: synthRoute.coords,
-        distance: synthRoute.dist,
-        elevation: Math.round(50 + synthRoute.dist / 2),
-        duration: time,
-        location,
-        pattern: 'synthetic-walk',
-        success: true,
-        warning: 'Using synthetic route',
-        debug: LOG
-      });
-    }
-
-    // GENERATE ROUTE
-    LOG.push('STEP: Generating route');
-    const route = generateRouteComplete(graph, lat, lng, targetKm);
-
-    if (!route || route.coords.length < 2) {
-      LOG.push('WARN: Route generation failed, using synthetic');
-      const synthRoute = generateSyntheticRoute(lat, lng, targetKm);
-      return respond(200, {
-        coordinates: synthRoute.coords,
-        distance: synthRoute.dist,
-        elevation: Math.round(50 + synthRoute.dist / 2),
-        duration: time,
-        location,
-        pattern: 'synthetic-walk',
-        success: true,
-        warning: 'Using synthetic route',
-        debug: LOG
-      });
-    }
-
-    LOG.push(`SUCCESS: ${route.coords.length} points, ${route.dist.toFixed(2)}km`);
-    const elapsed = Date.now() - startTime;
-    LOG.push(`TIME: ${elapsed}ms`);
+    LOG.push(`COMPLETE: ${coordinates.length} points, ${totalDist.toFixed(2)}km`);
 
     return respond(200, {
-      coordinates: route.coords,
-      distance: parseFloat(route.dist.toFixed(2)),
-      elevation: Math.round(50 + route.dist / 2),
+      coordinates: coordinates,
+      distance: parseFloat(totalDist.toFixed(2)),
+      elevation: Math.round(50 + totalDist / 2),
       duration: time,
       location,
-      pattern: 'intelligent-pedestrian',
+      pattern: 'osrm-pedestrian',
       success: true,
       debug: LOG
     });
 
   } catch (err) {
     LOG.push(`CRITICAL: ${err.message}`);
-    LOG.push(`STACK: ${err.stack?.split('\n')[1] || 'unknown'}`);
     return respond(500, { error: err.message, debug: LOG });
   }
 };
 
 // ============================================================================
-// RESPONSE HELPER
+// RESPONSE
 // ============================================================================
 
 function respond(status, data) {
@@ -165,7 +142,7 @@ function respond(status, data) {
 }
 
 // ============================================================================
-// GEOCODING
+// GEOCODE
 // ============================================================================
 
 async function geocodeFinal(location) {
@@ -184,469 +161,58 @@ async function geocodeFinal(location) {
 }
 
 // ============================================================================
-// LAYER 1: OVERPASS API
+// CARDINAL WAYPOINTS
 // ============================================================================
 
-async function fetchViaOverpass(lat, lng, targetKm, LOG) {
+function findCardinalWaypoints(lat, lng, radiusKm) {
+  const degPerKm = 1 / 111; // 1 degree ≈ 111km
+  const radiusDeg = radiusKm * degPerKm;
+
+  return {
+    north: { lat: lat + radiusDeg, lng: lng },
+    south: { lat: lat - radiusDeg, lng: lng },
+    east: { lat: lat, lng: lng + radiusDeg },
+    west: { lat: lat, lng: lng - radiusDeg }
+  };
+}
+
+// ============================================================================
+// OSRM ROUTING
+// ============================================================================
+
+async function routeViaOSRM(start, end) {
   try {
-    const radius = Math.max(800, Math.min(5000, targetKm * 2500));
-    const deg = radius / 111000;
-    const bbox = `${lat - deg},${lng - deg},${lat + deg},${lng + deg}`;
-
-    LOG.push(`  bbox: ${bbox.substring(0, 50)}...`);
-
-    const query = `[bbox:${lat - deg},${lng - deg},${lat + deg},${lng + deg}];(way["highway"];way["leisure"="park"];way["leisure"="garden"];);out geom;`;
-
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Stroll/1.0'
-      },
-      body: query,
+    const url = `https://router.project-osrm.org/route/v1/foot/${start[0]},${start[1]};${end[0]},${end[1]}?geometries=geojson&steps=false`;
+    
+    const response = await fetch(url, {
       timeout: 30000
     });
-
-    LOG.push(`  HTTP: ${response.status}`);
 
     if (!response.ok) {
       return null;
     }
 
-    const xml = await response.text();
-    LOG.push(`  Size: ${xml.length} bytes`);
+    const data = await response.json();
+    
+    if (!data.routes || data.routes.length === 0) {
+      return null;
+    }
 
-    const ways = parseOverpassXML(xml);
-    LOG.push(`  Parsed: ${ways.length} ways`);
+    const route = data.routes[0];
+    if (!route.geometry || !route.geometry.coordinates) {
+      return null;
+    }
 
-    return ways.length > 0 ? ways : null;
+    // Convert GeoJSON coordinates [lng, lat] to [lat, lng]
+    return route.geometry.coordinates.map(coord => [coord[1], coord[0]]);
+
   } catch (err) {
-    LOG.push(`  Error: ${err.message}`);
     return null;
   }
 }
 
 // ============================================================================
-// PARSE OVERPASS XML
-// ============================================================================
-
-function parseOverpassXML(xml) {
-  const ways = [];
-  
-  try {
-    const wayPattern = /<way[^>]*id="(\d+)"[^>]*>([\s\S]*?)<\/way>/g;
-    let match;
-
-    while ((match = wayPattern.exec(xml)) !== null) {
-      const wayId = match[1];
-      const wayContent = match[2];
-
-      const tags = {};
-      const tagPattern = /<tag k="([^"]*)" v="([^"]*)"/g;
-      let tagMatch;
-      while ((tagMatch = tagPattern.exec(wayContent)) !== null) {
-        tags[tagMatch[1]] = tagMatch[2];
-      }
-
-      const ndPattern = /<nd lat="([^"]*)" lon="([^"]*)"/g;
-      const nodes = [];
-      let ndMatch;
-      while ((ndMatch = ndPattern.exec(wayContent)) !== null) {
-        nodes.push({
-          lat: parseFloat(ndMatch[1]),
-          lon: parseFloat(ndMatch[2])
-        });
-      }
-
-      if (nodes.length >= 2 && nodes.every(n => !isNaN(n.lat) && !isNaN(n.lon))) {
-        ways.push({ id: wayId, nodes, tags });
-      }
-    }
-  } catch (err) {}
-
-  return ways;
-}
-
-// ============================================================================
-// LAYER 2: DIRECT OSM QUERY (simplified fallback)
-// ============================================================================
-
-async function fetchViaOSMDirect(lat, lng, targetKm, LOG) {
-  try {
-    LOG.push(`  Attempting alternative Overpass query...`);
-    
-    const radius = Math.max(500, Math.min(4000, targetKm * 2000));
-    const deg = radius / 111000;
-
-    // Simpler query that might work better
-    const query = `[bbox:${(lat-deg).toFixed(6)},${(lng-deg).toFixed(6)},${(lat+deg).toFixed(6)},${(lng+deg).toFixed(6)}];way["highway"];out geom;`;
-
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: query,
-      timeout: 30000
-    });
-
-    if (response.ok) {
-      const xml = await response.text();
-      const ways = parseOverpassXML(xml);
-      if (ways.length > 0) {
-        LOG.push(`  Success: ${ways.length} ways`);
-        return ways;
-      }
-    }
-  } catch (err) {
-    LOG.push(`  Error: ${err.message}`);
-  }
-
-  return null;
-}
-
-// ============================================================================
-// LAYER 3: SYNTHETIC NETWORK GENERATION
-// ============================================================================
-
-function generateSyntheticNetwork(lat, lng, targetKm, LOG) {
-  LOG.push(`Generating synthetic pedestrian network...`);
-  
-  // Create a grid of nodes around the location
-  const stepSize = 0.001; // ~100m
-  const nodes = [];
-  
-  for (let dlat = -0.01; dlat <= 0.01; dlat += stepSize) {
-    for (let dlng = -0.01; dlng <= 0.01; dlng += stepSize) {
-      nodes.push({
-        lat: lat + dlat,
-        lon: lng + dlng,
-        score: Math.random() > 0.3 ? 0.7 : 0.5
-      });
-    }
-  }
-
-  // Convert to ways by connecting nearby nodes
-  const ways = [];
-  for (let i = 0; i < nodes.length - 1; i++) {
-    const n1 = nodes[i];
-    const n2 = nodes[i + 1];
-    
-    ways.push({
-      id: `synthetic_${i}`,
-      nodes: [
-        { lat: n1.lat, lon: n1.lon },
-        { lat: n2.lat, lon: n2.lon }
-      ],
-      tags: { highway: 'residential', synthetic: true }
-    });
-  }
-
-  LOG.push(`Generated ${ways.length} synthetic ways`);
-  return ways;
-}
-
-// ============================================================================
-// SCORING (comprehensive)
-// ============================================================================
-
-function scoreWayComprehensive(way) {
-  try {
-    if (!way || !way.tags) return 0.3;
-    
-    const t = way.tags;
-
-    // Synthetic ways are good
-    if (t.synthetic) return 0.7;
-
-    // Blocks
-    if (t.access === 'private' || t.foot === 'no') return 0;
-
-    // Excellent
-    if (t.highway === 'footway') return 1.0;
-    if (t.highway === 'pedestrian') return 0.95;
-    if (t.highway === 'path') return 0.85;
-    if (t.leisure === 'park' || t.leisure === 'garden') return 0.85;
-    if (t.highway === 'track') return 0.70;
-
-    // Roads
-    let score = 0.5;
-    
-    if (['residential', 'unclassified', 'tertiary', 'service'].includes(t.highway)) {
-      score = 0.65;
-    }
-
-    if (t.sidewalk) score = Math.min(1, score + 0.2);
-    if (t.foot === 'designated') score = Math.min(1, score + 0.15);
-    if (t.lit === 'yes') score = Math.min(1, score + 0.1);
-
-    const speed = parseInt(t.maxspeed);
-    if (!isNaN(speed)) {
-      if (speed >= 80) score *= 0.5;
-      else if (speed >= 60) score *= 0.75;
-      else if (speed >= 50) score *= 0.85;
-    } else if (['motorway', 'trunk', 'primary'].includes(t.highway)) {
-      score *= 0.7;
-    }
-
-    return Math.max(0.05, Math.min(1, score));
-  } catch (err) {
-    return 0.3;
-  }
-}
-
-// ============================================================================
-// BUILD GRAPH
-// ============================================================================
-
-function buildGraphComplete(ways, centerLat, centerLng) {
-  const nodeMap = new Map();
-  const edges = [];
-  let nodeId = 0;
-
-  const getNode = (lat, lon) => {
-    const key = `${lat.toFixed(5)},${lon.toFixed(5)}`;
-    if (!nodeMap.has(key)) {
-      nodeMap.set(key, {
-        id: nodeId++,
-        lat,
-        lon,
-        distToCenter: Math.sqrt((lat - centerLat) ** 2 + (lon - centerLng) ** 2),
-        edges: []
-      });
-    }
-    return nodeMap.get(key);
-  };
-
-  for (const way of ways) {
-    if (!way.nodes || way.nodes.length < 2) continue;
-
-    const wayNodes = [];
-    for (const n of way.nodes) {
-      try {
-        wayNodes.push(getNode(n.lat, n.lon));
-      } catch (err) {
-        continue;
-      }
-    }
-
-    // Create edges BOTH DIRECTIONS (bidirectional for pedestrian routing)
-    for (let i = 0; i < wayNodes.length - 1; i++) {
-      const from = wayNodes[i];
-      const to = wayNodes[i + 1];
-      const dist = haversine(from.lat, from.lon, to.lat, to.lon);
-      
-      // Forward edge
-      const fwdEdge = {
-        from: from.id,
-        to: to.id,
-        dist,
-        score: way.score || 0.5
-      };
-      edges.push(fwdEdge);
-      from.edges.push(edges.length - 1);
-
-      // Reverse edge (pedestrians can walk both ways)
-      const revEdge = {
-        from: to.id,
-        to: from.id,
-        dist,
-        score: way.score || 0.5
-      };
-      edges.push(revEdge);
-      to.edges.push(edges.length - 1);
-    }
-  }
-
-  return {
-    nodes: Array.from(nodeMap.values()),
-    edges
-  };
-}
-
-// ============================================================================
-// ROUTE GENERATION
-// ============================================================================
-
-function generateRouteComplete(graph, centerLat, centerLng, targetDist) {
-  const { nodes, edges } = graph;
-
-  if (!nodes || nodes.length < 2) {
-    return null;
-  }
-
-  const nodeById = {};
-  for (const n of nodes) {
-    nodeById[n.id] = n;
-  }
-
-  // Start from closest to center
-  let start = nodes[0];
-  for (const n of nodes) {
-    if (n.distToCenter < start.distToCenter) {
-      start = n;
-    }
-  }
-
-  // Build outbound path first (60% of distance)
-  const outboundDist = targetDist * 0.5;
-  const outbound = buildOutboundPath(edges, nodeById, start, outboundDist);
-  
-  if (!outbound || outbound.length < 2) {
-    return null;
-  }
-
-  // Build return path back toward start (40% of distance)
-  const returnPath = buildReturnPath(edges, nodeById, outbound[outbound.length - 1], start, targetDist - outboundDist, outbound);
-
-  // Combine: outbound + return
-  const fullRoute = [...outbound];
-  
-  if (returnPath && returnPath.length > 1) {
-    // Add return path (skip first node to avoid duplicate)
-    fullRoute.push(...returnPath.slice(1));
-  }
-
-  if (fullRoute.length < 2) {
-    return null;
-  }
-
-  // Calculate total distance
-  let totalDist = 0;
-  for (let i = 0; i < fullRoute.length - 1; i++) {
-    totalDist += haversine(fullRoute[i].lat, fullRoute[i].lon, fullRoute[i+1].lat, fullRoute[i+1].lon);
-  }
-
-  return {
-    coords: fullRoute.map(n => [n.lat, n.lon]),
-    dist: totalDist
-  };
-}
-
-// Build outbound path moving AWAY from center
-function buildOutboundPath(edges, nodeById, start, targetDist) {
-  const route = [start];
-  const visited = new Set([start.id]);
-  let totalDist = 0;
-  let iters = 0;
-
-  while (iters < 500 && totalDist < targetDist) {
-    iters++;
-    const current = route[route.length - 1];
-
-    // Find edges leaving this node
-    const available = edges
-      .filter(e => e.from === current.id && !visited.has(e.to))
-      .map(e => ({ ...e, toNode: nodeById[e.to] }))
-      .filter(e => e.toNode);
-
-    if (available.length === 0) {
-      break;
-    }
-
-    // Choose edge that goes AWAY from center
-    const nextEdge = available.reduce((a, b) =>
-      b.toNode.distToCenter > a.toNode.distToCenter ? b : a
-    );
-
-    if (!nextEdge) break;
-
-    const next = nodeById[nextEdge.to];
-    const edgeDist = nextEdge.dist;
-    
-    // Check if adding this would overshoot
-    if (totalDist + edgeDist > targetDist * 1.2) {
-      break;
-    }
-
-    totalDist += edgeDist;
-    visited.add(next.id);
-    route.push(next);
-  }
-
-  return route;
-}
-
-// Build return path back toward start
-function buildReturnPath(edges, nodeById, current, start, targetDist, visitedOutbound) {
-  const route = [current];
-  const visited = new Set(visitedOutbound.map(n => n.id));
-  let totalDist = 0;
-  let iters = 0;
-
-  while (iters < 500 && totalDist < targetDist) {
-    iters++;
-    const node = route[route.length - 1];
-
-    // Find edges leaving this node
-    const available = edges
-      .filter(e => e.from === node.id && !visited.has(e.to))
-      .map(e => ({ ...e, toNode: nodeById[e.to] }))
-      .filter(e => e.toNode);
-
-    if (available.length === 0) {
-      break;
-    }
-
-    // Prefer edges that go TOWARD center/start
-    const nextEdge = available.reduce((a, b) => {
-      const aDist = a.toNode.distToCenter;
-      const bDist = b.toNode.distToCenter;
-      return bDist < aDist ? b : a;
-    });
-
-    if (!nextEdge) break;
-
-    const next = nodeById[nextEdge.to];
-    const edgeDist = nextEdge.dist;
-    
-    if (totalDist + edgeDist > targetDist * 1.3) {
-      break;
-    }
-
-    totalDist += edgeDist;
-    visited.add(next.id);
-    route.push(next);
-  }
-
-  return route;
-}
-
-// ============================================================================
-// SYNTHETIC ROUTE (guaranteed fallback)
-// ============================================================================
-
-function generateSyntheticRoute(lat, lng, targetKm) {
-  const coords = [];
-  const steps = Math.max(20, Math.floor(targetKm / 0.1));
-  
-  // Create spiral path
-  for (let i = 0; i <= steps; i++) {
-    const angle = (i / steps) * Math.PI * 2;
-    const radius = (i / steps) * (targetKm / 2 / 111);
-    
-    coords.push([
-      lat + radius * Math.cos(angle),
-      lng + radius * Math.sin(angle)
-    ]);
-  }
-
-  // Return leg
-  for (let i = steps; i >= 0; i--) {
-    const angle = (i / steps) * Math.PI * 2;
-    const radius = (i / steps) * (targetKm / 2 / 111);
-    
-    coords.push([
-      lat + radius * Math.cos(angle + Math.PI),
-      lng + radius * Math.sin(angle + Math.PI)
-    ]);
-  }
-
-  return {
-    coords,
-    dist: targetKm
-  };
-}
-
-// ============================================================================
-// FALLBACK CIRCLE
+// FALLBACK
 // ============================================================================
 
 function generateFallbackCircle(lat, lng, targetKm) {

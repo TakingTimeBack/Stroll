@@ -1478,7 +1478,7 @@
             }
 
             const btn = document.getElementById('generateBtn');
-            btn.textContent = 'Generating...';
+            btn.textContent = 'Generating route...';
             btn.disabled = true;
 
             try {
@@ -1500,10 +1500,14 @@
                     console.log('🔧 ROUTE DEBUG:', data.debug);
                 }
 
-                if (!response.ok) {
+                if (!response.ok || !data.success) {
                     const msg = data.error || 'Route generation failed';
                     console.error('❌ Route error:', msg);
                     throw new Error(msg);
+                }
+
+                if (!data.coordinates || data.coordinates.length < 2) {
+                    throw new Error('Invalid route data received');
                 }
 
                 state.currentRoute = {
