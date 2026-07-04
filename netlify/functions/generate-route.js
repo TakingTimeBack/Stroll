@@ -41,7 +41,8 @@ exports.handler = async (event) => {
 
     // GENERATE CARDINAL WAYPOINTS
     LOG.push('STEP: Finding cardinal waypoints');
-    const waypoints = findCardinalWaypoints(lat, lng, targetKm / 2);
+    // Use smaller radius: targetKm / 10 accounts for OSRM routing overhead + pentagon routing
+    const waypoints = findCardinalWaypoints(lat, lng, targetKm / 10);
     LOG.push(`WAYPOINTS: ${waypoints.length}`);
 
     // ROUTE via OSRM
