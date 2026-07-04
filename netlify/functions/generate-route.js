@@ -473,75 +473,156 @@ function generateRouteComplete(graph, centerLat, centerLng, targetDist) {
     }
   }
 
+  // Build outbound path first (60% of distance)
+  const outboundDist = targetDist * 0.5;
+  const outbound = buildOutboundPath(edges, nodeById, start, outboundDist);
+  
+  if (!outbound || outbound.length < 2) {
+    return null;
+  }
+
+  // Build return path back toward start (40% of distance)
+  const returnPath = buildReturnPath(edges, nodeById, outbound[outbound.length - 1], start, targetDist - outboundDist, outbound);
+
+  // Combine: outbound + return
+  const fullRoute = [...outbound];
+  
+  if (returnPath && returnPath.length > 1) {
+    // Add return path (skip first node to avoid duplicate)
+    fullRoute.push(...returnPath.slice(1));
+  }
+
+  if (fullRoute.length < 2) {
+    return null;
+  }
+
+  // Calculate total distance
+  let totalDist = 0;
+  for (let i = 0; i < fullRoute.length - 1; i++) {
+    totalDist += haversine(fullRoute[i].lat, fullRoute[i].lon, fullRoute[i+1].lat, fullRoute[i+1].lon);
+  }
+
+  return {
+    coords: fullRoute.map(n => [n.lat, n.lon]),
+    dist: totalDist
+  };
+}
+
+// Build outbound path moving AWAY from center
+function buildOutboundPath(edges, nodeById, start, targetDist) {
   const route = [start];
   const visited = new Set([start.id]);
   let totalDist = 0;
-  let phase = 'outbound';
-  const turnAround = targetDist * 0.6;
-
   let iters = 0;
-  while (iters < 1000) {
+
+  while (iters < 500 && totalDist < targetDist) {
     iters++;
     const current = route[route.length - 1];
 
-    // Get available edges
+    // Find edges leaving this node
     const available = edges
       .filter(e => e.from === current.id && !visited.has(e.to))
       .map(e => ({ ...e, toNode: nodeById[e.to] }))
       .filter(e => e.toNode);
 
     if (available.length === 0) {
-      // Try to jump to unvisited
-      let best = null;
-      let bestDist = Infinity;
-      for (const n of nodes) {
-        if (!visited.has(n.id)) {
-          const d = haversine(current.lat, current.lon, n.lat, n.lon);
-          if (d < bestDist && d < 0.1) {
-            best = n;
-            bestDist = d;
-          }
-        }
-      }
-      if (best) {
-        visited.add(best.id);
-        route.push(best);
-        totalDist += bestDist;
-      } else {
-        break;
-      }
-      continue;
+      break;
     }
 
-    // Choose direction
-    let nextEdge;
-    if (phase === 'outbound' && totalDist < turnAround) {
-      nextEdge = available.reduce((a, b) =>
-        b.toNode.distToCenter > a.toNode.distToCenter ? b : a
-      );
-    } else {
-      if (phase === 'outbound') phase = 'return';
-      nextEdge = available.reduce((a, b) =>
-        b.toNode.distToCenter < a.toNode.distToCenter ? b : a
-      );
-    }
+    // Choose edge that goes AWAY from center
+    const nextEdge = available.reduce((a, b) =>
+      b.toNode.distToCenter > a.toNode.distToCenter ? b : a
+    );
 
     if (!nextEdge) break;
 
     const next = nodeById[nextEdge.to];
-    totalDist += nextEdge.dist;
+    const edgeDist = nextEdge.dist;
+    
+    // Check if adding this would overshoot
+    if (totalDist + edgeDist > targetDist * 1.2) {
+      break;
+    }
+
+    totalDist += edgeDist;
     visited.add(next.id);
     route.push(next);
-
-    if (totalDist >= targetDist * 0.85) break;
   }
 
-  if (route.length < 2) return null;
+  return route;
+}
 
-  return {
-    coords: route.map(n => [n.lat, n.lon]),
-    dist: totalDist
-  };
+// Build return path back toward start
+function buildReturnPath(edges, nodeById, current, start, targetDist, visitedOutbound) {
+  const route = [current];
+  const visited = new Set(visitedOutbound.map(n => n.id));
+  let totalDist = 0;
+  let iters = 0;
+
+  while (iters < 500 && totalDist < targetDist) {
+    iters++;
+    const node = route[route.length - 1];
+
+    // Find edges leaving this node
+    const available = edges
+      .filter(e => e.from === node.id && !visited.has(e.to))
+      .map(e => ({ ...e, toNode: nodeById[e.to] }))
+      .filter(e => e.toNode);
+
+    if (available.length === 0) {
+      // Can't find new edges, try going backwards on visited paths
+      const backEdges = edges
+        .filter(e => e.to === node.id && !visited.has(e.from))
+        .map(e => ({ ...e, toNode: nodeById[e.from] }))
+        .filter(e => e.toNode);
+
+      if (backEdges.length === 0) {
+        break;
+      }
+
+      // Prefer edges that go toward start
+      const nextEdge = backEdges.reduce((a, b) => {
+        const aDist = haversine(a.toNode.lat, a.toNode.lon, start.lat, start.lon);
+        const bDist = haversine(b.toNode.lat, b.toNode.lon, start.lat, start.lon);
+        return bDist < aDist ? b : a;
+      });
+
+      if (!nextEdge) break;
+
+      const next = nodeById[nextEdge.to];
+      const edgeDist = nextEdge.dist;
+      
+      if (totalDist + edgeDist > targetDist * 1.3) {
+        break;
+      }
+
+      totalDist += edgeDist;
+      visited.add(next.id);
+      route.push(next);
+    } else {
+      // Prefer edges that go TOWARD center (return phase)
+      const nextEdge = available.reduce((a, b) => {
+        const aDist = a.toNode.distToCenter;
+        const bDist = b.toNode.distToCenter;
+        return bDist < aDist ? b : a;
+      });
+
+      if (!nextEdge) break;
+
+      const next = nodeById[nextEdge.to];
+      const edgeDist = nextEdge.dist;
+      
+      if (totalDist + edgeDist > targetDist * 1.3) {
+        break;
+      }
+
+      totalDist += edgeDist;
+      visited.add(next.id);
+      route.push(next);
+    }
+  }
+
+  return route;
 }
 
 // ============================================================================
