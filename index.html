@@ -49,6 +49,40 @@
             transition: background 0.3s ease, color 0.3s ease;
         }
 
+        /* Heading Colors */
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--color-text);
+        }
+
+        /* Input Fields - Dark Mode Safe */
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        textarea,
+        select {
+            background: var(--color-bg-alt) !important;
+            color: var(--color-text) !important;
+            border-color: var(--color-border) !important;
+            caret-color: var(--color-primary) !important;
+        }
+
+        input[type="text"]::placeholder,
+        input[type="number"]::placeholder,
+        input[type="email"]::placeholder,
+        textarea::placeholder {
+            color: var(--color-text-light) !important;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="email"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--color-primary) !important;
+            box-shadow: 0 0 0 2px rgba(107, 144, 128, 0.2);
+        }
+
         html, body, #app {
             width: 100%;
             height: 100%;
@@ -644,8 +678,18 @@
                     </div>
                 </div>
 
-                <div style="background: rgba(107, 144, 128, 0.1); border: 1px solid var(--color-primary); border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.5;">
-                    <strong style="color: var(--color-primary);">⚠️ Safety Notice:</strong> Our algorithm works to identify safe walking routes and avoid major roads, but it can make mistakes. Always exercise caution, check the map before walking, and follow local traffic rules. You are responsible for your own safety.
+                <div style="background: rgba(107, 144, 128, 0.1); border: 1px solid var(--color-primary); border-radius: 8px; padding: 14px; margin: 18px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.6;">
+                    <strong style="color: var(--color-primary); display: block; margin-bottom: 8px;">⚠️ Important Safety Notices:</strong>
+                    <ul style="margin: 0; padding-left: 16px;">
+                        <li>Our algorithm works to identify safe pedestrian routes, but <strong>can make mistakes</strong></li>
+                        <li><strong>Always check the map</strong> before walking - verify streets are safe</li>
+                        <li>Routes may include roads, pavements, or footpaths - <strong>use your judgment</strong></li>
+                        <li>Street conditions change - check for roadworks, hazards, flooding, etc.</li>
+                        <li>You are <strong>fully responsible for your own safety</strong></li>
+                        <li>Follow all local traffic laws and watch for traffic</li>
+                        <li>Not suitable for children without adult supervision</li>
+                        <li>Don't use while driving or operating machinery</li>
+                    </ul>
                 </div>
 
                 <button class="welcome-button" id="welcomeStartBtn">Get Started</button>
@@ -660,11 +704,17 @@
                 <div class="tagline">Taking Time Back</div>
             </div>
             <div class="header-right">
+                <button class="icon-btn" id="infoBtn" title="App Info">ℹ️</button>
                 <button class="icon-btn" id="statsBtn" title="Stats">📊</button>
                 <button class="icon-btn" id="settingsBtn" title="Settings">⚙️</button>
                 <button class="icon-btn" id="darkModeBtn" title="Dark Mode">🌙</button>
             </div>
         </header>
+
+        <!-- Tagline -->
+        <div style="text-align: center; padding: 12px 20px; background: var(--color-bg); border-bottom: 1px solid var(--color-border);">
+            <p style="margin: 0; font-size: 13px; color: var(--color-text-light); font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase;">Skip the planning. Start walking.</p>
+        </div>
 
         <!-- Main Content -->
         <main>
@@ -683,8 +733,9 @@
                 <!-- Location -->
                 <div class="control-group">
                     <label class="control-label">📍 Where Are You?</label>
-                    <input type="text" id="locationInput" placeholder="Enter location or use GPS" 
-                           style="width: 100%; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt);">
+                    <input type="text" id="locationInput" placeholder="Enter location, street name, or neighborhood" 
+                           style="width: 100%; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt); color: var(--color-text);">
+                    <p style="font-size: 12px; color: var(--color-text-light); margin-top: 8px; margin-bottom: 0;">Examples: "Main Street", "Trafalgar Square", "Soho, London"</p>
                     <button class="btn" id="gpsBtn" style="width: 100%; margin-top: 10px;">📍 Use My Location</button>
                 </div>
 
@@ -703,7 +754,7 @@
                     </div>
                     <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
                         <input type="number" id="customTime" placeholder="Custom (min)" min="10" max="300" 
-                               style="flex: 1; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt);">
+                               style="flex: 1; padding: 11px; border: 1.5px solid var(--color-border); border-radius: 8px; font-size: 15px; background: var(--color-bg-alt); color: var(--color-text);">
                         <button id="customTimeBtn" class="btn" style="flex: 0.5; padding: 11px 12px;">Set</button>
                     </div>
                 </div>
@@ -828,6 +879,11 @@
                 </label>
             </div>
 
+            <div style="margin-bottom: 18px;">
+                <button class="btn-primary" id="pwaInstallBtn" style="display: none; background: var(--color-primary); color: white; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; margin: 0; margin-bottom: 12px;">📱 Install App (PWA)</button>
+                <button class="btn" id="pwaInfoBtn" style="width: 100%; padding: 12px; margin-bottom: 12px;">ℹ️ What is PWA?</button>
+            </div>
+
             <div style="margin-bottom: 20px; padding: 14px; background: var(--color-bg-alt); border-radius: 10px; border: 1px solid var(--color-border);">
                 <p style="font-size: 13px; margin-bottom: 10px; font-weight: 600; color: var(--color-primary);">💝 Support This Project</p>
                 <p style="font-size: 13px; margin-bottom: 12px; color: var(--color-text-light);">Stroll is free and always will be. Your support keeps development going.</p>
@@ -838,8 +894,85 @@
         </div>
     </div>
 
+    <!-- PWA Info Modal -->
+    <div id="pwaModal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1001;">
+        <div style="background: var(--color-bg); padding: 24px; border-radius: 14px; max-width: 90%; max-height: 80vh; overflow-y: auto;">
+            <h2 style="margin-bottom: 18px; font-size: 20px; font-weight: 700; color: var(--color-text);">📱 Install Stroll as an App</h2>
+            
+            <div style="background: var(--color-bg-alt); padding: 16px; border-radius: 10px; border: 1px solid var(--color-border); margin-bottom: 18px;">
+                <p style="font-size: 14px; color: var(--color-text); line-height: 1.6; margin-bottom: 12px;">
+                    <strong>What is a PWA (Progressive Web App)?</strong>
+                </p>
+                <p style="font-size: 13px; color: var(--color-text-light); line-height: 1.6; margin-bottom: 12px;">
+                    Stroll can be installed on your phone like a regular app - no App Store needed!
+                </p>
+                
+                <div style="background: var(--color-bg); padding: 12px; border-radius: 8px; font-size: 13px; color: var(--color-text-light); margin-bottom: 12px;">
+                    <p style="margin: 0 0 8px 0;"><strong>✅ Benefits:</strong></p>
+                    <ul style="margin: 0; padding-left: 20px; color: var(--color-text-light);">
+                        <li>💾 Works offline (cached version)</li>
+                        <li>⚡ Loads faster than browser</li>
+                        <li>📱 Full-screen, like native app</li>
+                        <li>🔔 Can send notifications</li>
+                        <li>🎯 Home screen icon</li>
+                        <li>📱 No App Store needed</li>
+                    </ul>
+                </div>
+
+                <p style="font-size: 12px; color: var(--color-text-light); margin: 12px 0 0 0;">
+                    <strong>How to install:</strong>
+                </p>
+                <p style="font-size: 12px; color: var(--color-text-light); margin: 8px 0 0 0;">
+                    <strong>iPhone:</strong> Tap Share → Add to Home Screen<br>
+                    <strong>Android:</strong> Tap menu (⋮) → Install App or Add to Home Screen<br>
+                    <strong>Desktop:</strong> Click the install icon in your browser address bar
+                </p>
+            </div>
+
+            <button id="closePwaBtn" class="btn-primary" style="width: 100%;">Close</button>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <script>
+        // ==================== PWA SETUP ====================
+        // Register service worker for offline support
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(reg => console.log('✅ Service Worker registered'))
+                    .catch(err => console.log('⚠️ Service Worker registration failed:', err));
+            });
+        }
+
+        // PWA Install Prompt
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            console.log('📱 PWA install prompt available');
+            
+            // Show install button after a delay
+            setTimeout(() => {
+                const pwaBtn = document.getElementById('pwaInstallBtn');
+                if (pwaBtn) {
+                    pwaBtn.style.display = 'block';
+                }
+                // Show popup hint first time
+                if (!localStorage.getItem('pwaPromptSeen')) {
+                    showPwaPrompt();
+                    localStorage.setItem('pwaPromptSeen', 'true');
+                }
+            }, 1000);
+        });
+
+        function showPwaPrompt() {
+            const modal = document.getElementById('pwaModal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+        }
+
         // Wait for DOM to be fully loaded
         document.addEventListener('DOMContentLoaded', () => {
             console.log('DOM loaded, attaching button handlers...');
@@ -1262,6 +1395,38 @@
         }
 
         // ==================== SETTINGS ====================
+        // Info button - show welcome screen again
+        document.getElementById('infoBtn').addEventListener('click', () => {
+            const welcomeScreen = document.getElementById('welcomeScreen');
+            welcomeScreen.classList.remove('hidden');
+        });
+
+        // PWA Install button handler
+        document.getElementById('pwaInstallBtn').addEventListener('click', () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    if (choiceResult.outcome === 'accepted') {
+                        console.log('✅ User accepted PWA install');
+                        document.getElementById('pwaInstallBtn').style.display = 'none';
+                        alert('✅ Stroll installed! Check your home screen or app drawer.');
+                    } else {
+                        console.log('❌ User rejected PWA install');
+                    }
+                    deferredPrompt = null;
+                });
+            }
+        });
+
+        // PWA Info modal
+        document.getElementById('pwaInfoBtn').addEventListener('click', () => {
+            document.getElementById('pwaModal').style.display = 'flex';
+        });
+
+        document.getElementById('closePwaBtn').addEventListener('click', () => {
+            document.getElementById('pwaModal').style.display = 'none';
+        });
+
         // Settings button
         document.getElementById('settingsBtn').addEventListener('click', () => {
             document.getElementById('settingsModal').style.display = 'flex';
@@ -1298,11 +1463,17 @@
 
         document.getElementById('newRouteBtn').addEventListener('click', () => {
             document.getElementById('resultsModal').style.display = 'none';
-            // Reset form for new generation
+            // Keep location for generating another route same location
             document.getElementById('locationInput').focus();
         });
 
-        // Share buttons
+        document.getElementById('differentRouteBtn').addEventListener('click', () => {
+            document.getElementById('resultsModal').style.display = 'none';
+            // Clear location and let user enter new one
+            document.getElementById('locationInput').value = '';
+            document.getElementById('locationInput').focus();
+        });
+
         // Share buttons
         document.getElementById('shareTwitter').addEventListener('click', () => {
             const text = `Just generated a ${state.currentRoute.distance}km walk with Stroll! Try it: strollapp.netlify.app`;
@@ -1539,6 +1710,7 @@ ${points}
                     </div>
                 </div>
                 <button id="newRouteBtn" style="width: 100%; background: var(--color-primary); color: white; padding: 16px; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 16px;">Generate Another</button>
+                <button id="differentRouteBtn" style="width: 100%; background: var(--color-bg-alt); color: var(--color-text); padding: 14px; border: 1.5px solid var(--color-border); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 10px;">🔄 Different Route (New Location)</button>
             </div>
         </div>
     </div>
