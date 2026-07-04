@@ -43,18 +43,17 @@ exports.handler = async (event) => {
     const selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
     console.log('✅ Route pattern:', selectedPattern);
 
-    // BALANCED: Reasonable waypoint density
-    // Tight enough to prevent A-roads without breaking OSRM
-    let baseRadius = 0.0035;
-    if (distanceKm > 3) baseRadius = 0.005;
-    if (distanceKm > 5) baseRadius = 0.0065;
-    if (distanceKm > 8) baseRadius = 0.008;
+    // NUCLEAR: Super dense waypoints - OSRM cannot use major roads at this density
+    let baseRadius = 0.002;
+    if (distanceKm > 3) baseRadius = 0.003;
+    if (distanceKm > 5) baseRadius = 0.004;
+    if (distanceKm > 8) baseRadius = 0.005;
 
-    // 18-25 waypoints - dense enough to prevent major roads
-    const numWaypoints = Math.max(18, Math.ceil(distanceKm * 1.5));
+    // 40-60 waypoints - so dense that major roads are impossible
+    const numWaypoints = Math.max(40, Math.ceil(distanceKm * 5));
     let waypoints = [];
 
-    console.log(`📍 Creating ${selectedPattern} with ${numWaypoints} waypoints...`);
+    console.log(`📍 Creating ULTRA-DENSE ${selectedPattern} with ${numWaypoints} waypoints...`);
 
     if (selectedPattern === 'circle') {
       for (let i = 0; i < numWaypoints; i++) {
